@@ -1,0 +1,285 @@
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { BasicInfoStep } from '@/components/order/BasicInfoStep'
+import { CakeDetailsStep } from '@/components/order/CakeDetailsStep'
+import { FillingsStep } from '@/components/order/FillingsStep'
+import { OrderSummaryCard } from '@/components/order/OrderSummaryCard'
+import { SummaryStep } from '@/components/order/SummaryStep'
+import { Button } from '@/components/ui/Button'
+import { useOrderDraft } from '@/hooks/useOrderDraft'
+import { REFERENCE_IMAGE } from '@/lib/constants'
+import { checkAvailability } from '@/services/availabilityService'
+import { buildOrder, quoteDraft, submitOrder, toSummaryView, type SummaryView } from '@/services/orderService'
+import type { AvailabilityResult, Order, OrderDraft, PriceLine } from '@/types'
+import { isBookableDate } from '@/utils/dates'
+import { cx } from '@/utils/cx'
+import { formatEgp, formatOrderText } from '@/utils/format'
+import { validateBasicInfo, validateCake, validateCustomer, validateFilling, type FieldErrors } from '@/utils/validation'
+
+const STEP_TITLES = ['بيانات الموعد', 'تفاصيل التورتة', 'الحشوة', 'الملخص']
+
+interface DoneState {
+  message: string
+  order: Order
+  view: SummaryView
+  preview: string | null
+  lines: PriceLine[]
+}
+
+export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
+  const { draft, step, update: updateDraft, setStep, reset } = useOrderDraft(initial)
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [availability, setAvailability] = useState<AvailabilityResult | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [referenceError, setReferenceError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [done, setDone] = useState<DoneState | null>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const firstStep = useRef(true)
+
+  useEffect(() => {
+    if (!file) {
+      setPreview(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  useEffect(() => {
+    if (!draft.date || !draft.time || !isBookableDate(draft.date)) {
+      setAvailability(null)
+      setChecking(false)
+      return
+    }
+    let cancelled = false
+    setChecking(true)
+    checkAvailability({ date: draft.date, time: draft.time }).then((result) => {
+      if (cancelled) return
+      setAvailability(result)
+      setChecking(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [draft.date, draft.time])
+
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false
+      return
+    }
+    headingRef.current?.focus()
+  }, [step])
+
+  function update(patch: Partial<OrderDraft>) {
+    setErrors((current) => {
+      const next = { ...current }
+      for (const key of Object.keys(patch)) delete next[key]
+      return next
+    })
+    updateDraft(patch)
+  }
+
+  function onReference(next: File | null) {
+    if (!next) {
+      setFile(null)
+      setReferenceError('')
+      return
+    }
+    if (!REFERENCE_IMAGE.accept.some((type) => type === next.type)) {
+      setReferenceError(REFERENCE_IMAGE.badType)
+      return
+    }
+    if (next.size > REFERENCE_IMAGE.maxBytes) {
+      setReferenceError(REFERENCE_IMAGE.tooLarge)
+      return
+    }
+    setReferenceError('')
+    setFile(next)
+  }
+
+  function currentErrors(): FieldErrors {
+    if (step === 0) return validateBasicInfo(draft, availability, checking)
+    if (step === 1) {
+      const next = validateCake(draft)
+      if (referenceError) next.reference = referenceError
+      return next
+    }
+    if (step === 2) return validateFilling(draft)
+    return validateCustomer(draft)
+  }
+
+  function goNext() {
+    const nextErrors = currentErrors()
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+    setErrors({})
+    setStep((value) => Math.min(value + 1, STEP_TITLES.length - 1))
+  }
+
+  function goBack() {
+    setErrors({})
+    setStep((value) => Math.max(value - 1, 0))
+  }
+
+  async function confirm() {
+    const nextErrors = validateCustomer(draft)
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
+    if (!availability || availability.status !== 'clear') {
+      setSubmitError('لا يمكن إرسال الطلب قبل التحقق من الموعد.')
+      return
+    }
+
+    setSubmitting(true)
+    setSubmitError('')
+    const view = toSummaryView(draft)
+    const built = buildOrder(draft, availability.source, file ? 'session-only' : 'none')
+    const result = await submitOrder(built.order, file)
+    setSubmitting(false)
+
+    if (!result.ok || !result.order) {
+      setSubmitError(result.message)
+      return
+    }
+
+    const keptPreview = file ? URL.createObjectURL(file) : null
+    setDone({
+      message: result.message,
+      order: result.order,
+      view,
+      preview: keptPreview,
+      lines: built.total.lines,
+    })
+    reset()
+    setFile(null)
+  }
+
+  function closeDone() {
+    if (done?.preview) URL.revokeObjectURL(done.preview)
+    setDone(null)
+    setCopied(false)
+  }
+
+  async function copySummary() {
+    if (!done) return
+    const text = formatOrderText(done.order, done.lines)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  const estimate = quoteDraft(draft)
+
+  if (done) {
+    return (
+      <div className="grid gap-6">
+        <header>
+          <p className="text-sm font-semibold text-rose">رقم الطلب {done.order.orderNumber}</p>
+          <h2 className="mt-2 font-display text-4xl text-rose-deep">تم تسجيل التفاصيل</h2>
+          <p className="mt-3 leading-8 text-muted">{done.message}</p>
+        </header>
+        {done.preview ? (
+          <img src={done.preview} alt="الصورة المرجعية المرفقة في هذه الجلسة" className="max-h-56 rounded-2xl object-contain" />
+        ) : null}
+        <OrderSummaryCard summary={done.view} />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button type="button" onClick={() => void copySummary()}>
+            {copied ? 'تم النسخ' : 'نسخي الملخص'}
+          </Button>
+          <Button type="button" variant="secondary" onClick={closeDone}>
+            طلب جديد
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <form
+      className="scroll-mt-28"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (step === STEP_TITLES.length - 1) void confirm()
+        else goNext()
+      }}
+    >
+      <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="خطوات الطلب">
+        {STEP_TITLES.map((title, index) => (
+          <li key={title} className="grid gap-2">
+            <span className={cx('h-1 rounded-full', index <= step ? 'bg-rose' : 'bg-line')} />
+            <span className={cx('text-xs sm:text-sm', index === step ? 'font-semibold text-rose-deep' : 'text-muted')}>
+              {title}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      <h2 ref={headingRef} tabIndex={-1} className="font-display text-4xl text-rose-deep outline-none">
+        {STEP_TITLES[step]}
+      </h2>
+      <p className="mt-2 mb-6 text-sm text-muted">
+        الخطوة {step + 1} من {STEP_TITLES.length}
+      </p>
+
+      {step === 0 ? (
+        <BasicInfoStep draft={draft} errors={errors} onChange={update} availability={availability} checking={checking} />
+      ) : null}
+      {step === 1 ? (
+        <CakeDetailsStep
+          draft={draft}
+          errors={errors}
+          onChange={update}
+          referencePreview={preview}
+          referenceError={referenceError}
+          onReference={onReference}
+        />
+      ) : null}
+      {step === 2 ? <FillingsStep draft={draft} errors={errors} onChange={update} /> : null}
+      {step === 3 ? <SummaryStep draft={draft} errors={errors} onChange={update} /> : null}
+
+      {submitError ? (
+        <p role="alert" className="mt-4 text-sm text-rose-deep">
+          {submitError}
+        </p>
+      ) : null}
+
+      <div className="h-28 sm:hidden" aria-hidden="true" />
+      <div className="sticky bottom-0 z-20 mt-6 border-t border-line bg-ivory/95 py-3 backdrop-blur sm:static">
+        {draft.sizeId ? (
+          <p className="mb-3 text-sm text-muted">
+            التقدير الحالي:{' '}
+            <span className="font-semibold text-ink">
+              {estimate.estimatedTotal == null ? 'يُحدَّد لاحقًا' : formatEgp(estimate.estimatedTotal)}
+              {estimate.pendingCharges.length ? '، وبه بنود تُحدَّد لاحقًا' : ''}
+            </span>
+          </p>
+        ) : null}
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+          {step === 0 ? (
+            <Link to="/catalog" className="inline-flex min-h-12 items-center justify-center rounded-full px-4 font-semibold text-rose-deep">
+              تصفحي التورت
+            </Link>
+          ) : (
+            <Button type="button" variant="ghost" onClick={goBack}>
+              السابق
+            </Button>
+          )}
+          <Button type="submit" disabled={submitting}>
+            {step === STEP_TITLES.length - 1 ? (submitting ? 'جارٍ الإرسال' : 'تأكيد الطلب') : 'التالي'}
+          </Button>
+        </div>
+      </div>
+    </form>
+  )
+}
+

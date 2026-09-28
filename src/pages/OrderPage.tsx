@@ -1,0 +1,35 @@
+import { useSearchParams } from 'react-router-dom'
+import { Container } from '@/components/layout/Container'
+import { OrderWizard } from '@/components/order/OrderWizard'
+import { usePageTitle } from '@/hooks/usePageTitle'
+import type { DesignMode, OrderDraft } from '@/types'
+
+function readInitial(params: URLSearchParams): Partial<OrderDraft> {
+  const initial: Partial<OrderDraft> = {}
+  const mode = params.get('mode')
+  const cake = params.get('cake')
+  if (mode === 'catalog' || mode === 'similar' || mode === 'custom') {
+    initial.designMode = mode satisfies DesignMode
+  }
+  if (cake) initial.cakeId = cake
+  return initial
+}
+
+export function OrderPage() {
+  usePageTitle('طلب تورتة | مستيكا')
+  const [params] = useSearchParams()
+
+  return (
+    <Container className="py-8 sm:py-12">
+      <header className="mb-6 max-w-2xl">
+        <h1 className="font-display text-4xl text-rose-deep sm:text-5xl">اطلبي تورتتك</h1>
+        <p className="mt-3 leading-8 text-muted">
+          نبدأ بالموعد والمنطقة، ثم التصميم والحشوة. الحجز قبل الاستلام بثلاثة أيام على الأقل.
+        </p>
+      </header>
+      <div className="mx-auto max-w-3xl rounded-[32px] border border-line bg-paper p-4 shadow-soft sm:p-8">
+        <OrderWizard key={params.toString()} initial={readInitial(params)} />
+      </div>
+    </Container>
+  )
+}
