@@ -146,16 +146,26 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
 
     if (!result.ok || !result.order) {
       setSubmitError(result.message)
+      if (result.conflict) {
+        setAvailability({ status: 'conflict', source: availability.source, message: result.message })
+        setStep(0)
+      }
       return
     }
 
     const keptPreview = file ? URL.createObjectURL(file) : null
+    const serverView: SummaryView = {
+      ...view,
+      lines: result.order.priceLines?.length ? result.order.priceLines : view.lines,
+      estimatedTotal: result.order.totalPrice,
+      pendingCharges: result.order.pendingCharges ?? view.pendingCharges,
+    }
     setDone({
       message: result.message,
       order: result.order,
-      view,
+      view: serverView,
       preview: keptPreview,
-      lines: built.total.lines,
+      lines: serverView.lines,
     })
     reset()
     setFile(null)
@@ -185,7 +195,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
       <div className="grid gap-6">
         <header>
           <p className="text-sm font-semibold text-rose">رقم الطلب {done.order.orderNumber}</p>
-          <h2 className="mt-2 font-display text-4xl text-rose-deep">تم تسجيل التفاصيل</h2>
+          <h2 className="mt-2 font-display text-4xl text-rose-deep">طلبك قيد المراجعة</h2>
           <p className="mt-3 leading-8 text-muted">{done.message}</p>
         </header>
         {done.preview ? (
@@ -275,7 +285,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
             </Button>
           )}
           <Button type="submit" disabled={submitting}>
-            {step === STEP_TITLES.length - 1 ? (submitting ? 'جارٍ الإرسال' : 'تأكيد الطلب') : 'التالي'}
+            {step === STEP_TITLES.length - 1 ? (submitting ? 'جارٍ الإرسال' : 'إرسال للمراجعة') : 'التالي'}
           </Button>
         </div>
       </div>

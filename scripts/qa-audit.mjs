@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const BASE = 'http://127.0.0.1:5173'
+const BASE = process.env.QA_BASE || 'http://127.0.0.1:5173'
 const WIDTHS = [360, 390, 430, 768, 1024, 1440]
 const issues = []
 
@@ -173,7 +173,8 @@ async function main() {
   // invalid date (< 3 days)
   const today = new Date()
   const tooSoon = iso(addDays(today, 1))
-  const valid = iso(addDays(today, 5))
+  // Far enough out to avoid collisions with prior live integration bookings.
+  const valid = iso(addDays(today, 28))
   await page.locator('#date').fill(tooSoon)
   await page.waitForTimeout(200)
   const soonMsg = await page.locator('#date-error, [role="alert"]').allTextContents()
@@ -183,36 +184,43 @@ async function main() {
   const timeDisabled = await page.locator('#time').isDisabled()
   if (!timeDisabled) note('high', 'Time select should be disabled for invalid date')
 
-  // valid date
+  // Pick a clear slot on the far date (try several times if a prior run booked one).
+  const candidateTimes = ['14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00']
+  let chosenTime = null
   await page.locator('#date').fill(valid)
   await page.waitForTimeout(200)
   if (await page.locator('#time').isDisabled()) note('high', 'Time still disabled after valid date')
-  await page.locator('#time').selectOption('14:00')
-  await page.waitForTimeout(400)
-  const availText = await page.locator('[role="status"]').textContent().catch(() => '')
-  if ((availText || '').includes('التجريبية') || (availText || '').includes('تجريبية')) {
-    note('high', `Customer-facing availability message mentions experimental data: ${availText}`)
-  }
 
-  // also check that fake sample conflicts no longer appear
-  const sampleDate = iso(addDays(today, 5))
-  await page.locator('#date').fill(sampleDate)
-  await page.locator('#time').selectOption('16:00')
-  await page.waitForTimeout(400)
-  const conflictText = await page.locator('[role="status"]').textContent().catch(() => '')
-  if ((conflictText || '').includes('متعارض')) {
-    note('high', `Unexpected conflict at ${sampleDate} 16:00 without a saved order: ${conflictText}`)
+  for (const time of candidateTimes) {
+    await page.locator('#time').selectOption(time)
+    await page.waitForTimeout(700)
+    const availText = await page.locator('[role="status"]').textContent().catch(() => '')
+    if ((availText || '').includes('التجريبية') || (availText || '').includes('تجريبية')) {
+      note('high', `Customer-facing availability message mentions experimental data: ${availText}`)
+      break
+    }
+    if ((availText || '').includes('متعارض')) continue
+    if ((availText || '').includes('تعذّر') || (availText || '').includes('تعذر')) continue
+    chosenTime = time
+    break
   }
-  if ((conflictText || '').includes('التجريبية') || (conflictText || '').includes('تجريبية')) {
-    note('high', `Availability still mentions experimental wording: ${conflictText}`)
+  if (!chosenTime) {
+    note('high', `Could not find a clear slot on ${valid}`)
+  } else {
+    // Sanity: far-future slot should not be an unexpected conflict once selected.
+    const clearText = await page.locator('[role="status"]').textContent().catch(() => '')
+    if ((clearText || '').includes('متعارض')) {
+      note('high', `Selected slot still shows conflict: ${clearText}`)
+    }
   }
 
   // continue happy path with clear slot
-  await page.locator('#date').fill(valid)
-  await page.locator('#time').selectOption('14:00')
-  await page.waitForTimeout(400)
+  if (chosenTime) {
+    await page.locator('#time').selectOption(chosenTime)
+    await page.waitForTimeout(500)
+  }
   await page.getByRole('button', { name: 'التالي' }).click()
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(400)
 
   // step 2 cake
   if (!(await page.getByRole('heading', { name: 'تفاصيل التورتة' }).count())) {
@@ -308,18 +316,34 @@ async function main() {
     await page.locator('#name').fill('مريم أحمد')
     await page.locator('#phone').fill('01012345678')
   }
-  await page.getByRole('button', { name: 'تأكيد الطلب' }).click()
+  await page.getByRole('button', { name: 'إرسال للمراجعة' }).click()
   await page.waitForTimeout(500)
   const doneText = await page.locator('main').innerText()
-  if (!doneText.includes('تم تسجيل التفاصيل') && !doneText.includes('رقم الطلب')) {
+  if (!doneText.includes('طلبك قيد المراجعة') && !doneText.includes('رقم الطلب')) {
     note('high', `Order confirmation failed. Text: ${doneText.slice(0, 300)}`)
+  }
+  if (doneText.includes('مؤكد') && !doneText.includes('ليس مؤكد') && !doneText.includes('لا يُعد مؤكد')) {
+    note('high', `Success copy may claim confirmation: ${doneText.slice(0, 300)}`)
   }
   if (doneText.includes('التجريبية')) note('high', 'Confirmation still mentions experimental wording')
 
-  // giza path smoke
+  // duplicate slot conflict (after a successful submit, same date/time must conflict)
+  const usedDate = valid
+  const usedTime = chosenTime || '14:00'
   await page.getByRole('button', { name: 'طلب جديد' }).click()
   await page.waitForTimeout(200)
   await page.getByText('توصيل', { exact: true }).click()
+  await page.locator('#area').selectOption('cairo')
+  await page.locator('#servings').fill('20')
+  await page.locator('#date').fill(usedDate)
+  await page.locator('#time').selectOption(usedTime)
+  await page.waitForTimeout(800)
+  const dupStatus = await page.locator('[role="status"]').textContent().catch(() => '')
+  if (!(dupStatus || '').includes('متعارض')) {
+    note('high', `Expected conflict after saving same slot: ${dupStatus}`)
+  }
+
+  // giza path smoke
   await page.locator('#area').selectOption('giza')
   const giza = await page.locator('#area').inputValue()
   if (giza !== 'giza') note('high', 'Giza selection failed')

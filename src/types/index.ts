@@ -116,6 +116,7 @@ export interface Order {
   deliveryPrice: number | null
   totalPrice: number | null
   pendingCharges: string[]
+  priceLines: PriceLine[]
   status: OrderStatus
   createdAt: string
   availabilitySource: DataSource

@@ -1,54 +1,60 @@
-import { cakes } from '@/data/cakes'
-import { deliveryPolicy, deliveryZones, designExtras, fillings, timeSlots } from '@/data/options'
-import { basicCakePricing, pricingNotes, singleTierSizes, twoTierSizes } from '@/data/pricing'
+import { getLocalBasicPricing } from '@/data/localCatalog'
+import { timeSlots } from '@/data/options'
+import { getCatalog } from '@/services/catalogStore'
 import type { Cake, CakeSize, PricingGroup } from '@/types'
 
 /**
- * Catalog reads stay behind these functions.
- * They return the local lists until the Supabase tables are filled.
- * Replace the function bodies later; keep the return types.
+ * Synchronous catalog accessors.
+ * Backed by the in-memory store (local by default, Supabase after hydration).
  */
 
 export function listCakes(): Cake[] {
-  return cakes
+  return getCatalog().cakes
 }
 
 export function getCake(id: string): Cake | undefined {
-  return cakes.find((cake) => cake.id === id)
+  return getCatalog().cakes.find((cake) => cake.id === id)
 }
 
 export function listSizes(group?: PricingGroup): CakeSize[] {
-  if (group === 'single') return singleTierSizes
-  if (group === 'two-tier') return twoTierSizes
-  return [...singleTierSizes, ...twoTierSizes]
+  const sizes = getCatalog().sizes
+  if (group === 'single') return sizes.filter((size) => size.group === 'single')
+  if (group === 'two-tier') return sizes.filter((size) => size.group === 'two-tier')
+  return sizes
 }
 
 export function getSize(id: string): CakeSize | undefined {
-  return listSizes().find((size) => size.id === id)
+  return getCatalog().sizes.find((size) => size.id === id)
 }
 
 export function getBasicPricing() {
-  return basicCakePricing
+  const sizes = getCatalog().sizes
+  const single = sizes.filter((size) => size.group === 'single')
+  const twoTier = sizes.filter((size) => size.group === 'two-tier')
+  if (single.length && twoTier.length) {
+    return { single, twoTier }
+  }
+  return getLocalBasicPricing()
 }
 
 export function getPricingNotes() {
-  return pricingNotes
+  return getCatalog().pricingNotes
 }
 
 export function listFillings() {
-  return fillings
+  return getCatalog().fillings
 }
 
 export function getFilling(id: string) {
-  return fillings.find((filling) => filling.id === id)
+  return getCatalog().fillings.find((filling) => filling.id === id)
 }
 
 export function listExtras() {
-  return designExtras
+  return getCatalog().extras
 }
 
 export function listZones() {
-  return deliveryZones.filter((zone) => zone.enabled)
+  return getCatalog().zones.filter((zone) => zone.enabled)
 }
 
 export function getZone(id: string) {
@@ -60,5 +66,9 @@ export function listTimeSlots() {
 }
 
 export function getDeliveryPolicy() {
-  return deliveryPolicy
+  const catalog = getCatalog()
+  return {
+    fee: catalog.deliveryFee,
+    note: catalog.deliveryNote,
+  }
 }

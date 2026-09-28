@@ -3,7 +3,8 @@ import { getSupabase } from '@/lib/supabase'
 import type { AvailabilityQuery, AvailabilityResult, Order } from '@/types'
 
 const LOCAL_CLEAR = 'لم نجد تعارضًا ظاهرًا لهذا الموعد بعد. يبقى التأكيد بعد مراجعة الطلب.'
-const LIVE_CLEAR = 'لا يظهر تعارض لهذا الموعد. يبقى الطلب قيد المراجعة حتى التأكيد.'
+const LIVE_CLEAR =
+  'لا يظهر تعارض لهذا الموعد حاليًا. التحقق لا يحجز الموعد، ويبقى التأكيد بعد مراجعة الطلب.'
 const CONFLICT = 'هذا الموعد متعارض مع حجز موجود. اختاري وقتًا آخر.'
 const UNKNOWN = 'تعذّر التحقق من الموعد الآن، لذلك لا يمكن المتابعة.'
 
