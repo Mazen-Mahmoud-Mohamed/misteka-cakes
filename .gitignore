@@ -7,3 +7,4 @@ dist
 .DS_Store
 qa-output
 supabase/.temp
+.playwright-browsers

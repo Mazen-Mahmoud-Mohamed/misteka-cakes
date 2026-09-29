@@ -35,6 +35,10 @@ VITE_SUPABASE_ANON_KEY=
 
 نفّذي SQL الموجود في `supabase/schema.sql` داخل مشروع Supabase (جداول الكتالوج، الطلبات، RLS، التخزين، والبذرة).
 
+للوحة الإدارة نفّذي أيضًا `supabase/admin-dashboard.sql`، ثم أنشئي مستخدم Auth من لوحة Supabase وأضيفي `uuid` الخاص به إلى `public.admin_users`.
+
+لوحة الإدارة: `/#/admin/login` (بدون تسجيل عام).
+
 ## التوفر وحجز الموعد
 
 التحقق من الموعد في الواجهة استرشادي فقط ولا يحجز الموعد.
