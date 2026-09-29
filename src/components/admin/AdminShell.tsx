@@ -6,6 +6,11 @@ import { cx } from '@/utils/cx'
 const nav = [
   { to: '/admin', label: 'الرئيسية', end: true },
   { to: '/admin/orders', label: 'الطلبات', end: false },
+  { to: '/admin/cakes', label: 'التورت', end: false },
+  { to: '/admin/sizes', label: 'المقاسات والأسعار', end: false },
+  { to: '/admin/fillings', label: 'الحشوات', end: false },
+  { to: '/admin/extras', label: 'الإضافات', end: false },
+  { to: '/admin/zones', label: 'مناطق التوصيل', end: false },
 ]
 
 export function AdminShell() {
@@ -31,7 +36,7 @@ export function AdminShell() {
 
   return (
     <div className="min-h-screen bg-cream/40 lg:grid lg:grid-cols-[16rem_1fr]">
-      <aside className="border-b border-line bg-paper lg:border-b-0 lg:border-e">
+      <aside className="border-b border-line bg-paper lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto lg:border-b-0 lg:border-e">
         <div className="px-5 py-6">
           <p className="font-latin text-sm tracking-[0.2em] text-gold uppercase">Misteka Cakes</p>
           <h1 className="mt-1 font-display text-3xl text-rose-deep">لوحة التحكم</h1>
@@ -47,7 +52,7 @@ export function AdminShell() {
               end={item.end}
               className={({ isActive }) =>
                 cx(
-                  'min-h-11 shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold transition',
+                  'min-h-11 shrink-0 rounded-2xl px-4 py-2 text-sm font-semibold transition whitespace-nowrap',
                   isActive ? 'bg-blush text-rose-deep' : 'text-muted hover:bg-ivory hover:text-ink',
                 )
               }
@@ -55,18 +60,6 @@ export function AdminShell() {
               {item.label}
             </NavLink>
           ))}
-          <span className="hidden min-h-11 items-center rounded-2xl px-4 py-2 text-sm text-muted/70 lg:flex">
-            التورت (قريبًا)
-          </span>
-          <span className="hidden min-h-11 items-center rounded-2xl px-4 py-2 text-sm text-muted/70 lg:flex">
-            الحشوات (قريبًا)
-          </span>
-          <span className="hidden min-h-11 items-center rounded-2xl px-4 py-2 text-sm text-muted/70 lg:flex">
-            الإضافات (قريبًا)
-          </span>
-          <span className="hidden min-h-11 items-center rounded-2xl px-4 py-2 text-sm text-muted/70 lg:flex">
-            مناطق التوصيل (قريبًا)
-          </span>
         </nav>
         <div className="border-t border-line p-4">
           <Button type="button" variant="ghost" className="w-full" onClick={() => void onLogout()}>

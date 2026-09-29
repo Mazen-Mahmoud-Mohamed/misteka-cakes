@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { AdminAlert, useFlash } from '@/components/admin/AdminAlert'
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
 import { StatusBadge } from '@/components/admin/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -41,6 +42,7 @@ export function AdminOrderDetailPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState('')
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null)
+  const { flash, setFlash, clearFlash } = useFlash()
 
   async function load() {
     setLoading(true)
@@ -79,8 +81,10 @@ export function AdminOrderDetailPage() {
     setPendingStatus(null)
     if (!result.ok) {
       setActionError(result.message)
+      setFlash({ tone: 'error', text: result.message })
       return
     }
+    setFlash({ tone: 'success', text: 'تم تحديث حالة الطلب بنجاح.' })
     await load()
   }
 
@@ -99,11 +103,19 @@ export function AdminOrderDetailPage() {
         ← العودة للطلبات
       </Link>
 
+      {flash ? (
+        <div className="mt-4">
+          <AdminAlert tone={flash.tone} onClose={clearFlash}>
+            {flash.text}
+          </AdminAlert>
+        </div>
+      ) : null}
+
       {loading ? <p className="mt-6 text-muted">جاري تحميل الطلب...</p> : null}
       {error ? (
-        <p role="alert" className="mt-6 text-rose-deep">
-          {error}
-        </p>
+        <div className="mt-6">
+          <AdminAlert tone="error">{error}</AdminAlert>
+        </div>
       ) : null}
 
       {!loading && order ? (
@@ -173,11 +185,21 @@ export function AdminOrderDetailPage() {
               ) : imageError ? (
                 <p className="text-rose-deep">{imageError}</p>
               ) : imageUrl ? (
-                <img
-                  src={imageUrl}
-                  alt="الصورة المرجعية للطلب"
-                  className="max-h-80 rounded-2xl border border-line object-contain"
-                />
+                <div className="grid gap-3">
+                  <img
+                    src={imageUrl}
+                    alt="الصورة المرجعية للطلب"
+                    className="max-h-80 rounded-2xl border border-line object-contain"
+                  />
+                  <a
+                    href={imageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-semibold text-rose-deep hover:underline"
+                  >
+                    فتح الصورة في نافذة جديدة
+                  </a>
+                </div>
               ) : (
                 <p className="text-muted">جاري تجهيز عرض الصورة...</p>
               )}
@@ -217,9 +239,9 @@ export function AdminOrderDetailPage() {
           </div>
 
           {actionError ? (
-            <p role="alert" className="mt-6 text-rose-deep">
-              {actionError}
-            </p>
+            <div className="mt-6">
+              <AdminAlert tone="error">{actionError}</AdminAlert>
+            </div>
           ) : null}
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">

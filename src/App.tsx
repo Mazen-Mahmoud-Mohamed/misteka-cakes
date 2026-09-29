@@ -10,6 +10,11 @@ import { AdminHomePage } from '@/pages/admin/AdminHomePage'
 import { AdminLoginPage } from '@/pages/admin/AdminLoginPage'
 import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
 import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage'
+import { AdminCakesPage } from '@/pages/admin/AdminCakesPage'
+import { AdminSizesPage } from '@/pages/admin/AdminSizesPage'
+import { AdminFillingsPage } from '@/pages/admin/AdminFillingsPage'
+import { AdminExtrasPage } from '@/pages/admin/AdminExtrasPage'
+import { AdminZonesPage } from '@/pages/admin/AdminZonesPage'
 import { CatalogPage } from '@/pages/CatalogPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -57,6 +62,11 @@ function AdminRoutes() {
             <Route index element={<AdminHomePage />} />
             <Route path="orders" element={<AdminOrdersPage />} />
             <Route path="orders/:id" element={<AdminOrderDetailPage />} />
+            <Route path="cakes" element={<AdminCakesPage />} />
+            <Route path="sizes" element={<AdminSizesPage />} />
+            <Route path="fillings" element={<AdminFillingsPage />} />
+            <Route path="extras" element={<AdminExtrasPage />} />
+            <Route path="zones" element={<AdminZonesPage />} />
           </Route>
         </Route>
         <Route path="/admin/*" element={<Navigate to="/admin/login" replace />} />

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AdminAlert } from '@/components/admin/AdminAlert'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Button } from '@/components/ui/Button'
 import { SelectField, TextField } from '@/components/ui/Field'
 import { listAdminOrders } from '@/services/admin/adminOrderService'
 import type { AdminDateFilter, AdminOrder, AdminStatusFilter } from '@/types/admin'
@@ -15,33 +17,38 @@ export function AdminOrdersPage() {
   const [date, setDate] = useState<AdminDateFilter>('all')
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+
+  async function load(isRefresh = false) {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    const result = await listAdminOrders({ status, date, search })
+    if (result.error) {
+      setError(result.error)
+      setOrders([])
+    } else {
+      setError('')
+      setOrders(result.orders)
+    }
+    setLoading(false)
+    setRefreshing(false)
+  }
 
   useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      const result = await listAdminOrders({ status, date, search })
-      if (cancelled) return
-      if (result.error) {
-        setError(result.error)
-        setOrders([])
-      } else {
-        setError('')
-        setOrders(result.orders)
-      }
-      setLoading(false)
-    }
     void load()
-    return () => {
-      cancelled = true
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, date, search])
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="mb-6">
-        <h2 className="font-display text-4xl text-rose-deep">الطلبات</h2>
-        <p className="mt-2 text-muted">مراجعة وإدارة طلبات العملاء.</p>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="font-display text-4xl text-rose-deep">الطلبات</h2>
+          <p className="mt-2 text-muted">مراجعة وإدارة طلبات العملاء.</p>
+        </div>
+        <Button type="button" variant="ghost" disabled={loading || refreshing} onClick={() => void load(true)}>
+          {refreshing ? 'جاري التحديث...' : 'تحديث'}
+        </Button>
       </header>
 
       <div className="mb-6 grid gap-3 rounded-3xl border border-line bg-paper p-4 shadow-soft md:grid-cols-3">
@@ -85,15 +92,15 @@ export function AdminOrdersPage() {
         </form>
       </div>
 
-      {loading ? <p className="text-muted">جاري تحميل الطلبات...</p> : null}
       {error ? (
-        <p role="alert" className="text-rose-deep">
-          {error}
-        </p>
+        <div className="mb-4">
+          <AdminAlert tone="error">{error}</AdminAlert>
+        </div>
       ) : null}
+      {loading ? <p className="text-muted">جاري تحميل الطلبات...</p> : null}
       {!loading && !error && orders.length === 0 ? (
         <p className="rounded-3xl border border-dashed border-line bg-paper p-10 text-center text-muted">
-          لا توجد طلبات حتى الآن.
+          لا توجد طلبات مطابقة للبحث.
         </p>
       ) : null}
 
@@ -104,6 +111,7 @@ export function AdminOrdersPage() {
               <thead className="border-b border-line bg-ivory/80 text-muted">
                 <tr>
                   <th className="px-4 py-3 text-start font-semibold">رقم الطلب</th>
+                  <th className="px-4 py-3 text-start font-semibold">العميل</th>
                   <th className="px-4 py-3 text-start font-semibold">تاريخ الاستلام</th>
                   <th className="px-4 py-3 text-start font-semibold">وقت الاستلام</th>
                   <th className="px-4 py-3 text-start font-semibold">المنطقة</th>
@@ -122,6 +130,12 @@ export function AdminOrdersPage() {
                       <Link to={`/admin/orders/${order.id}`} className="font-semibold text-rose-deep hover:underline">
                         {order.orderNumber}
                       </Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold">{order.customerName}</p>
+                      <p className="text-xs text-muted" dir="ltr">
+                        {order.phone}
+                      </p>
                     </td>
                     <td className="px-4 py-3">{formatArabicDate(order.date)}</td>
                     <td className="px-4 py-3">{formatTimeLabel(order.time)}</td>

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AdminAlert } from '@/components/admin/AdminAlert'
 import { StatusBadge } from '@/components/admin/StatusBadge'
+import { Button } from '@/components/ui/Button'
 import { getAdminOrderStats, listAdminOrders } from '@/services/admin/adminOrderService'
 import type { AdminOrder, AdminOrderStats } from '@/types/admin'
 import { formatArabicDate, formatTimeLabel } from '@/utils/dates'
@@ -15,51 +17,67 @@ function StatCard({ label, value }: { label: string; value: number }) {
   )
 }
 
+function StatSkeleton() {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="h-28 animate-pulse rounded-3xl border border-line bg-paper" />
+      ))}
+    </div>
+  )
+}
+
 export function AdminHomePage() {
   const [stats, setStats] = useState<AdminOrderStats | null>(null)
   const [recent, setRecent] = useState<AdminOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    const [statsRes, recentRes] = await Promise.all([
+      getAdminOrderStats(),
+      listAdminOrders({ limit: 8 }),
+    ])
+    if (statsRes.error || recentRes.error) {
+      setError(statsRes.error || recentRes.error || 'حدث خطأ.')
+      setStats(null)
+      setRecent([])
+    } else {
+      setError('')
+      setStats(statsRes.stats)
+      setRecent(recentRes.orders)
+    }
+    setLoading(false)
+    setRefreshing(false)
+  }, [])
 
   useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      const [statsRes, recentRes] = await Promise.all([
-        getAdminOrderStats(),
-        listAdminOrders({ limit: 8 }),
-      ])
-      if (cancelled) return
-      if (statsRes.error || recentRes.error) {
-        setError(statsRes.error || recentRes.error || 'حدث خطأ.')
-        setStats(null)
-        setRecent([])
-      } else {
-        setError('')
-        setStats(statsRes.stats)
-        setRecent(recentRes.orders)
-      }
-      setLoading(false)
-    }
     void load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  }, [load])
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="mb-8">
-        <h2 className="font-display text-4xl text-rose-deep">الرئيسية</h2>
-        <p className="mt-2 text-muted">نظرة سريعة على طلبات مستيكا.</p>
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="font-display text-4xl text-rose-deep">الرئيسية</h2>
+          <p className="mt-2 text-muted">نظرة سريعة على طلبات مستيكا.</p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={loading || refreshing}
+          onClick={() => void load(true)}
+        >
+          {refreshing ? 'جاري التحديث...' : 'تحديث'}
+        </Button>
       </header>
 
-      {loading ? <p className="text-muted">جاري تحميل لوحة التحكم...</p> : null}
-      {error ? (
-        <p role="alert" className="text-rose-deep">
-          {error}
-        </p>
-      ) : null}
+      {error ? <div className="mb-4"><AdminAlert tone="error">{error}</AdminAlert></div> : null}
+
+      {loading ? <StatSkeleton /> : null}
 
       {!loading && !error && stats ? (
         <>
