@@ -15,8 +15,8 @@ export function OrderSummaryCard({ summary }: { summary: SummaryView }) {
   const total = summary.estimatedTotal == null ? 'يُحدَّد لاحقًا' : formatEgp(summary.estimatedTotal)
 
   return (
-    <article className="rounded-[28px] border border-gold/50 bg-gold-soft/25 p-2">
-      <div className="rounded-[22px] border border-line bg-paper p-5 sm:p-7">
+    <article className="rounded-3xl border border-gold/50 bg-gold-soft/25 p-2">
+      <div className="rounded-2xl border border-line bg-paper p-5 sm:p-7">
         <h3 className="font-display text-4xl text-rose-deep">ملخص الطلب</h3>
         <dl className="mt-4">
           <Row label="الاسم" value={summary.customerName} />

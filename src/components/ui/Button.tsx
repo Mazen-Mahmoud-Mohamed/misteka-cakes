@@ -9,7 +9,7 @@ const variants = {
 } as const
 
 const base =
-  'inline-flex min-h-12 items-center justify-center rounded-full px-6 text-center text-base font-semibold transition duration-200 disabled:cursor-not-allowed disabled:opacity-50'
+  'inline-flex min-h-12 cursor-pointer items-center justify-center rounded-full px-6 text-center text-base font-semibold transition duration-200 ease-out active:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none'
 
 type Variant = keyof typeof variants
 

@@ -1,117 +1,194 @@
-import { useEffect, useState } from 'react'
-import { AdminAlert, useFlash } from '@/components/admin/AdminAlert'
-import { Button } from '@/components/ui/Button'
-import { TextField } from '@/components/ui/Field'
+import { EnabledBadge } from '@/components/admin/AdminBadge'
+import { AdminAlert } from '@/components/admin/AdminAlert'
+import { AdminButton } from '@/components/admin/AdminButton'
+import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
+import { AdminSwitch, AdminTextField } from '@/components/admin/AdminField'
+import { AdminList, AdminTable, Td, Th, Tr } from '@/components/admin/AdminTable'
+import {
+  CatalogEditor,
+  CatalogListItem,
+  CatalogResults,
+  CatalogToolbar,
+  EditButton,
+  ID_HINT_EDIT,
+  ID_HINT_NEW,
+  IdText,
+  SORT_HINT,
+  useCatalogCrud,
+  useCatalogFilter,
+} from '@/components/admin/catalog'
+import { IconMapPin, IconPlus, IconRefresh } from '@/components/admin/icons'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { listAdminZones, upsertAdminZone, type AdminZoneRow } from '@/services/admin/adminCatalogService'
 
-const empty: AdminZoneRow = {
-  id: '',
-  name: '',
-  enabled: true,
-  sort_order: 100,
-}
-
 export function AdminZonesPage() {
-  const [rows, setRows] = useState<AdminZoneRow[]>([])
-  const [draft, setDraft] = useState<AdminZoneRow>(empty)
-  const [editing, setEditing] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const { flash, setFlash, clearFlash } = useFlash()
-
-  async function load() {
-    setLoading(true)
-    const res = await listAdminZones()
-    if (res.error) {
-      setError(res.error)
-      setRows([])
-    } else {
-      setError('')
-      setRows(res.data ?? [])
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function save() {
-    if (!draft.id.trim() || !draft.name.trim()) {
-      setFlash({ tone: 'error', text: 'أدخلي المعرّف والاسم.' })
-      return
-    }
-    setSaving(true)
-    const result = await upsertAdminZone({
+  usePageTitle('مناطق التوصيل | مستكة')
+  const crud = useCatalogCrud<AdminZoneRow>({
+    list: listAdminZones,
+    upsert: upsertAdminZone,
+    prepare: (draft) => ({
       ...draft,
       id: draft.id.trim(),
       sort_order: Number(draft.sort_order) || 0,
-    })
-    setSaving(false)
-    setFlash({ tone: result.ok ? 'success' : 'error', text: result.message })
-    if (result.ok) {
-      setEditing(false)
-      await load()
-    }
+    }),
+    validate: (draft) => ({
+      id: draft.id.trim() ? undefined : 'أدخلي المعرّف.',
+      name: draft.name.trim() ? undefined : 'أدخلي اسم المنطقة.',
+    }),
+  })
+  const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.id])
+
+  function startNew() {
+    crud.open({ id: '', name: '', enabled: true, sort_order: (crud.rows.at(-1)?.sort_order ?? 0) + 10 }, null)
   }
 
+  const draft = crud.draft
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-display text-4xl text-rose-deep">مناطق التوصيل</h2>
-          <p className="mt-2 text-muted">
-            المناطق المفعّلة تظهر في طلب العميل. سعر التوصيل حاليًا عبر أوبر وخارج سعر التورتة (حسب قاعدة المشروع الحالية).
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" onClick={() => void load()}>تحديث</Button>
-          <Button type="button" onClick={() => { setDraft({ ...empty, sort_order: (rows.at(-1)?.sort_order ?? 0) + 10 }); setEditing(true) }}>إضافة منطقة</Button>
-        </div>
-      </header>
+    <AdminPage>
+      <AdminPageHeader
+        title="مناطق التوصيل"
+        description="المناطق المفعّلة فقط تظهر للعميل عند اختيار التوصيل."
+        actions={
+          <>
+            <AdminButton icon={<IconRefresh size={18} />} loading={crud.refreshing} disabled={crud.loading} onClick={() => void crud.load(true)}>
+              تحديث
+            </AdminButton>
+            <AdminButton variant="primary" icon={<IconPlus size={18} />} onClick={startNew}>
+              إضافة منطقة
+            </AdminButton>
+          </>
+        }
+      />
 
-      {flash ? <div className="mb-4"><AdminAlert tone={flash.tone} onClose={clearFlash}>{flash.text}</AdminAlert></div> : null}
-      {loading ? <p className="text-muted">جاري التحميل...</p> : null}
-      {error ? <p role="alert" className="text-rose-deep">{error}</p> : null}
-      {!loading && !error && rows.length === 0 ? (
-        <p className="rounded-3xl border border-dashed border-line bg-paper p-8 text-center text-muted">لا توجد مناطق.</p>
+      <AdminAlert tone="info" className="mb-4">
+        سعر التوصيل حاليًا عبر أوبر وعلى حساب العميل، وخارج سعر التورتة.
+      </AdminAlert>
+
+      {!crud.loading && !crud.error && crud.rows.length > 0 ? (
+        <CatalogToolbar
+          id="zones-search"
+          placeholder="ابحثي باسم المنطقة أو المعرّف"
+          filter={filter}
+          total={crud.rows.length}
+          visible={filter.filtered.length}
+          noun="منطقة"
+        />
       ) : null}
 
-      <ul className="grid gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="rounded-3xl border border-line bg-paper p-4 shadow-soft">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-semibold">{row.name} <span className="text-muted">({row.id})</span></p>
-                <p className="mt-1 text-sm text-muted">{row.enabled ? 'مفعّلة' : 'معطّلة'}</p>
-              </div>
-              <Button type="button" variant="secondary" onClick={() => { setDraft({ ...row }); setEditing(true) }}>تعديل</Button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <CatalogResults
+        loading={crud.loading}
+        error={crud.error}
+        onRetry={() => void crud.load(true)}
+        retrying={crud.refreshing}
+        total={crud.rows.length}
+        visible={filter.filtered.length}
+        emptyTitle="لا توجد مناطق توصيل"
+        emptyDescription="أضيفي المناطق التي يتوفر فيها التوصيل لتظهر للعملاء."
+        emptyIcon={<IconMapPin />}
+        addLabel="إضافة منطقة"
+        onAdd={startNew}
+        onClearFilters={() => {
+          filter.setQuery('')
+          filter.setEnabled('all')
+        }}
+        table={
+          <AdminTable
+            caption="مناطق التوصيل"
+            head={
+              <>
+                <Th>المنطقة</Th>
+                <Th className="text-center">الترتيب</Th>
+                <Th>الحالة</Th>
+                <Th>
+                  <span className="sr-only">إجراء</span>
+                </Th>
+              </>
+            }
+          >
+            {filter.filtered.map((row) => (
+              <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
+                <Td>
+                  <p className="font-bold">{row.name}</p>
+                  <IdText>{row.id}</IdText>
+                </Td>
+                <Td className="w-28 text-center text-muted tabular-nums">{row.sort_order}</Td>
+                <Td className="w-36">
+                  <EnabledBadge enabled={row.enabled} />
+                </Td>
+                <Td className="w-px text-end">
+                  <EditButton label={`تعديل ${row.name}`} onClick={() => crud.open({ ...row }, row)} />
+                </Td>
+              </Tr>
+            ))}
+          </AdminTable>
+        }
+        list={
+          <AdminList label="مناطق التوصيل">
+            {filter.filtered.map((row) => (
+              <CatalogListItem
+                key={row.id}
+                title={row.name}
+                subtitle={<IdText>{row.id}</IdText>}
+                badges={<EnabledBadge enabled={row.enabled} />}
+                editLabel={`تعديل ${row.name}`}
+                onEdit={() => crud.open({ ...row }, row)}
+              />
+            ))}
+          </AdminList>
+        }
+      />
 
-      {editing ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
-          <div className="w-full max-w-lg rounded-3xl border border-line bg-paper p-6 shadow-soft">
-            <h3 className="font-display text-2xl text-rose-deep">حفظ المنطقة</h3>
-            <div className="mt-4 grid gap-3">
-              <TextField id="zone-id" label="المعرّف" dir="ltr" className="text-start" value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} hint="مثل cairo" />
-              <TextField id="zone-name" label="الاسم" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-              <TextField id="zone-sort" label="ترتيب العرض" type="number" dir="ltr" className="text-start" value={String(draft.sort_order)} onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })} />
-              <label className="flex min-h-11 items-center gap-2 font-semibold">
-                <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
-                مفعّلة في الموقع
-              </label>
-            </div>
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button type="button" variant="ghost" disabled={saving} onClick={() => setEditing(false)}>إلغاء</Button>
-              <Button type="button" disabled={saving} onClick={() => void save()}>{saving ? 'جارٍ الحفظ...' : 'حفظ'}</Button>
-            </div>
+      <CatalogEditor
+        crud={crud}
+        size="sm"
+        newTitle="منطقة جديدة"
+        editTitle="تعديل المنطقة"
+        disableTitle="تعطيل المنطقة؟"
+        disableBody="لن تظهر هذه المنطقة للعملاء عند اختيار التوصيل بعد الحفظ. الطلبات السابقة لا تتأثر."
+      >
+        {draft ? (
+          <div className="grid gap-4">
+            <AdminTextField
+              id="zone-name"
+              label="اسم المنطقة"
+              required
+              value={draft.name}
+              error={crud.fieldErrors.name}
+              onChange={(e) => crud.update({ name: e.target.value })}
+            />
+            <AdminTextField
+              id="zone-id"
+              label="المعرّف"
+              required
+              dir="ltr"
+              className="text-start"
+              value={draft.id}
+              error={crud.fieldErrors.id}
+              hint={crud.isNew ? `${ID_HINT_NEW} مثل cairo` : ID_HINT_EDIT}
+              onChange={(e) => crud.update({ id: e.target.value })}
+            />
+            <AdminTextField
+              id="zone-sort"
+              label="ترتيب العرض"
+              type="number"
+              inputMode="numeric"
+              dir="ltr"
+              className="text-start"
+              hint={SORT_HINT}
+              value={String(draft.sort_order)}
+              onChange={(e) => crud.update({ sort_order: Number(e.target.value) })}
+            />
+            <AdminSwitch
+              id="zone-enabled"
+              label="مفعّلة في الموقع"
+              description="عند التعطيل لا تظهر المنطقة في خيارات التوصيل."
+              checked={draft.enabled}
+              onChange={(enabled) => crud.update({ enabled })}
+            />
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+      </CatalogEditor>
+    </AdminPage>
   )
 }

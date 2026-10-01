@@ -29,6 +29,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: clip;
   background-color: var(--color-ivory);
   background-image:
     radial-gradient(ellipse at 100% 0%, rgba(232, 196, 188, 0.45), transparent 42%),
@@ -36,6 +37,7 @@ body {
   background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-sans);
+  line-height: 1.7;
   text-rendering: optimizeLegibility;
 }
 
@@ -65,7 +67,12 @@ img {
 }
 
 .rise {
-  animation: rise 0.7s ease both;
+  animation: rise 0.35s ease-out both;
+}
+
+a,
+button {
+  cursor: pointer;
 }
 
 .skip-link {
@@ -98,5 +105,10 @@ img {
 
   .rise {
     animation: none;
+  }
+
+  a,
+  button {
+    transition: none;
   }
 }

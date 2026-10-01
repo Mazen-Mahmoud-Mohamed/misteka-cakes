@@ -10,7 +10,7 @@ import { cx } from '@/utils/cx'
 const filters: Array<CakeCategory | 'all'> = ['all', 'birthday', 'celebration']
 
 export function CatalogPage() {
-  usePageTitle('التورت | مستيكا')
+  usePageTitle('التورت | مستكة')
   const [filter, setFilter] = useState<CakeCategory | 'all'>('all')
   const cakes = listCakes().filter((cake) => filter === 'all' || cake.category === filter)
 
@@ -28,17 +28,21 @@ export function CatalogPage() {
             aria-pressed={filter === item}
             onClick={() => setFilter(item)}
             className={cx(
-              'min-h-11 rounded-full px-4 text-sm font-semibold',
-              filter === item ? 'bg-rose-deep text-ivory' : 'border border-line bg-paper text-ink',
+              'inline-flex min-h-11 cursor-pointer items-center rounded-full px-4 text-sm font-semibold transition duration-200 motion-reduce:transition-none',
+              filter === item ? 'bg-rose-deep text-ivory' : 'border border-line bg-paper text-ink hover:border-rose/40',
             )}
           >
             {categoryLabels[item]}
           </button>
         ))}
       </div>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="flex flex-wrap justify-center gap-6">
         {cakes.map((cake) => (
-          <CakeCard key={cake.id} cake={cake} />
+          <CakeCard
+            key={cake.id}
+            cake={cake}
+            className="w-full md:w-[calc((100%-1.5rem)/2)] lg:w-[calc((100%-3rem)/3)]"
+          />
         ))}
       </div>
     </Container>

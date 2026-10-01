@@ -168,5 +168,5 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
   pending_review: 'قيد المراجعة',
   confirmed: 'مؤكد',
   rejected: 'مرفوض',
-  cancelled: 'ملغي',
+  cancelled: 'ملغى',
 }

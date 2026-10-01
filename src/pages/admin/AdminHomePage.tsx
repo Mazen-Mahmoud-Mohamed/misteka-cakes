@@ -1,27 +1,38 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AdminAlert } from '@/components/admin/AdminAlert'
-import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Button } from '@/components/ui/Button'
+import { AdminButton, AdminButtonLink } from '@/components/admin/AdminButton'
+import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
+import { AdminStatCard } from '@/components/admin/AdminStatCard'
+import { AdminEmptyState, AdminErrorState, AdminListSkeleton, Skeleton } from '@/components/admin/AdminStates'
+import {
+  IconBan,
+  IconCalendar,
+  IconCheckCircle,
+  IconChevronForward,
+  IconClock,
+  IconOrders,
+  IconRefresh,
+  IconXCircle,
+} from '@/components/admin/icons'
+import { OrdersCardList, OrdersTable } from '@/components/admin/OrderRows'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { getAdminOrderStats, listAdminOrders } from '@/services/admin/adminOrderService'
 import type { AdminOrder, AdminOrderStats } from '@/types/admin'
-import { formatArabicDate, formatTimeLabel } from '@/utils/dates'
-import { formatEgp } from '@/utils/format'
 
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-3xl border border-line bg-paper p-5 shadow-soft">
-      <p className="text-sm text-muted">{label}</p>
-      <p className="mt-2 font-display text-4xl text-rose-deep">{value}</p>
-    </div>
-  )
+function share(part: number, total: number): string {
+  if (!total) return 'لا توجد طلبات بعد'
+  return `${Math.round((part / total) * 100)}% من الإجمالي`
 }
 
-function StatSkeleton() {
+function StatsSkeleton() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div role="status" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <span className="sr-only">جاري تحميل الإحصاءات</span>
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="h-28 animate-pulse rounded-3xl border border-line bg-paper" />
+        <div key={i} className="flex min-h-[7.5rem] flex-col rounded-xl border border-line bg-paper p-4">
+          <Skeleton className="h-3.5 w-20" />
+          <Skeleton className="mt-3 h-7 w-12" />
+          <Skeleton className="mt-3 h-3 w-24" />
+        </div>
       ))}
     </div>
   )
@@ -33,6 +44,7 @@ export function AdminHomePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  usePageTitle('لوحة التحكم | مستكة')
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -59,76 +71,137 @@ export function AdminHomePage() {
   }, [load])
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="font-display text-4xl text-rose-deep">الرئيسية</h2>
-          <p className="mt-2 text-muted">نظرة سريعة على طلبات مستيكا.</p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          disabled={loading || refreshing}
-          onClick={() => void load(true)}
-        >
-          {refreshing ? 'جاري التحديث...' : 'تحديث'}
-        </Button>
-      </header>
+    <AdminPage>
+      <AdminPageHeader
+        title="الرئيسية"
+        description="نظرة سريعة على طلبات مستكة وما يحتاج إلى مراجعة."
+        actions={
+          <AdminButton
+            icon={<IconRefresh size={18} />}
+            loading={refreshing}
+            disabled={loading}
+            onClick={() => void load(true)}
+          >
+            {refreshing ? 'جاري التحديث...' : 'تحديث'}
+          </AdminButton>
+        }
+      />
 
-      {error ? <div className="mb-4"><AdminAlert tone="error">{error}</AdminAlert></div> : null}
+      {loading ? (
+        <>
+          <StatsSkeleton />
+          <div className="mt-8">
+            <Skeleton className="mb-3 h-5 w-32" />
+            <AdminListSkeleton rows={5} label="جاري تحميل أحدث الطلبات" />
+          </div>
+        </>
+      ) : null}
 
-      {loading ? <StatSkeleton /> : null}
+      {!loading && error ? (
+        <AdminErrorState description={error} onRetry={() => void load(true)} retrying={refreshing} />
+      ) : null}
 
       {!loading && !error && stats ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <StatCard label="إجمالي الطلبات" value={stats.total} />
-            <StatCard label="الطلبات قيد المراجعة" value={stats.pendingReview} />
-            <StatCard label="الطلبات المؤكدة" value={stats.confirmed} />
-            <StatCard label="الطلبات المرفوضة" value={stats.rejected} />
-            <StatCard label="الطلبات الملغاة" value={stats.cancelled} />
-            <StatCard label="طلبات اليوم (موعد الاستلام)" value={stats.today} />
-          </div>
+          {stats.pendingReview > 0 ? (
+            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-gold/50 bg-gold-soft/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="flex items-center gap-2.5 text-sm font-semibold text-ink">
+                <IconClock size={20} className="text-[#7a5622]" />
+                {stats.pendingReview === 1
+                  ? 'يوجد طلب واحد قيد المراجعة بانتظار قرارك.'
+                  : `يوجد ${stats.pendingReview} طلبات قيد المراجعة بانتظار قرارك.`}
+              </p>
+              <AdminButtonLink
+                to="/admin/orders?status=pending_review"
+                size="sm"
+                variant="primary"
+                className="self-start sm:self-auto"
+              >
+                مراجعة الطلبات
+                <IconChevronForward size={16} />
+              </AdminButtonLink>
+            </div>
+          ) : null}
 
-          <section className="mt-10">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="font-display text-2xl text-rose-deep">أحدث الطلبات</h3>
-              <Link to="/admin/orders" className="text-sm font-semibold text-rose-deep hover:underline">
-                عرض الكل
-              </Link>
+          <section aria-label="إحصاءات الطلبات" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <AdminStatCard
+              label="إجمالي الطلبات"
+              value={stats.total}
+              hint="كل الطلبات المسجّلة"
+              icon={<IconOrders size={18} />}
+              tone="brand"
+              to="/admin/orders"
+            />
+            <AdminStatCard
+              label="قيد المراجعة"
+              value={stats.pendingReview}
+              hint={stats.pendingReview ? 'تحتاج إلى قرار' : 'لا يوجد ما يحتاج مراجعة'}
+              icon={<IconClock size={18} />}
+              tone="pending"
+              highlight={stats.pendingReview > 0}
+              to="/admin/orders?status=pending_review"
+            />
+            <AdminStatCard
+              label="مؤكدة"
+              value={stats.confirmed}
+              hint={share(stats.confirmed, stats.total)}
+              icon={<IconCheckCircle size={18} />}
+              tone="success"
+              to="/admin/orders?status=confirmed"
+            />
+            <AdminStatCard
+              label="مرفوضة"
+              value={stats.rejected}
+              hint={share(stats.rejected, stats.total)}
+              icon={<IconXCircle size={18} />}
+              tone="danger"
+              to="/admin/orders?status=rejected"
+            />
+            <AdminStatCard
+              label="ملغاة"
+              value={stats.cancelled}
+              hint={share(stats.cancelled, stats.total)}
+              icon={<IconBan size={18} />}
+              tone="neutral"
+              to="/admin/orders?status=cancelled"
+            />
+            <AdminStatCard
+              label="طلبات اليوم"
+              value={stats.today}
+              hint="موعد استلامها اليوم"
+              icon={<IconCalendar size={18} />}
+              tone="default"
+              to="/admin/orders?date=today"
+            />
+          </section>
+
+          <section className="mt-8" aria-labelledby="recent-orders-title">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 id="recent-orders-title" className="text-base font-bold text-ink">
+                أحدث الطلبات
+              </h2>
+              {recent.length ? (
+                <AdminButtonLink to="/admin/orders" size="sm" variant="ghost">
+                  عرض كل الطلبات
+                  <IconChevronForward size={16} />
+                </AdminButtonLink>
+              ) : null}
             </div>
             {recent.length === 0 ? (
-              <p className="rounded-3xl border border-dashed border-line bg-paper p-8 text-center text-muted">
-                لا توجد طلبات حتى الآن.
-              </p>
+              <AdminEmptyState
+                icon={<IconOrders />}
+                title="لا توجد طلبات"
+                description="ستظهر هنا أحدث الطلبات فور وصولها من الموقع."
+              />
             ) : (
-              <ul className="grid gap-3">
-                {recent.map((order) => (
-                  <li key={order.id}>
-                    <Link
-                      to={`/admin/orders/${order.id}`}
-                      className="flex flex-col gap-2 rounded-3xl border border-line bg-paper px-5 py-4 shadow-soft transition hover:border-gold sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-ink">{order.orderNumber}</p>
-                        <p className="mt-1 text-sm text-muted">
-                          {order.customerName} · {formatArabicDate(order.date)} · {formatTimeLabel(order.time)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-ink">
-                          {order.totalPrice == null ? 'يُحدَّد لاحقًا' : formatEgp(order.totalPrice)}
-                        </span>
-                        <StatusBadge status={order.status} />
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <OrdersTable orders={recent} compact className="hidden md:block" />
+                <OrdersCardList orders={recent} compact className="md:hidden" />
+              </>
             )}
           </section>
         </>
       ) : null}
-    </div>
+    </AdminPage>
   )
 }

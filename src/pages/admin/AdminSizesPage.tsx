@@ -1,7 +1,23 @@
-import { useEffect, useState } from 'react'
-import { AdminAlert, useFlash } from '@/components/admin/AdminAlert'
-import { Button } from '@/components/ui/Button'
-import { SelectField, TextField } from '@/components/ui/Field'
+import { EnabledBadge } from '@/components/admin/AdminBadge'
+import { AdminButton } from '@/components/admin/AdminButton'
+import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
+import { AdminSelectField, AdminSwitch, AdminTextField } from '@/components/admin/AdminField'
+import { AdminList, AdminTable, Td, Th, Tr } from '@/components/admin/AdminTable'
+import {
+  CatalogEditor,
+  CatalogListItem,
+  CatalogResults,
+  CatalogToolbar,
+  EditButton,
+  ID_HINT_EDIT,
+  ID_HINT_NEW,
+  IdText,
+  SORT_HINT,
+  useCatalogCrud,
+  useCatalogFilter,
+} from '@/components/admin/catalog'
+import { IconPlus, IconRefresh, IconRuler } from '@/components/admin/icons'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import {
   listAdminSizes,
   upsertAdminSize,
@@ -21,133 +37,239 @@ const empty: AdminCakeSizeRow = {
   enabled: true,
 }
 
+const GROUP_LABELS: Record<AdminCakeSizeRow['pricing_group'], string> = {
+  single: 'طبقة واحدة',
+  'two-tier': 'طابقين',
+}
+
 export function AdminSizesPage() {
-  const [rows, setRows] = useState<AdminCakeSizeRow[]>([])
-  const [draft, setDraft] = useState<AdminCakeSizeRow>(empty)
-  const [editing, setEditing] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const { flash, setFlash, clearFlash } = useFlash()
-
-  async function load() {
-    setLoading(true)
-    const res = await listAdminSizes()
-    if (res.error) {
-      setError(res.error)
-      setRows([])
-    } else {
-      setError('')
-      setRows(res.data ?? [])
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void load()
-  }, [])
-
-  function startNew() {
-    setDraft({ ...empty, sort_order: (rows.at(-1)?.sort_order ?? 0) + 10 })
-    setEditing(true)
-  }
-
-  function startEdit(row: AdminCakeSizeRow) {
-    setDraft({ ...row })
-    setEditing(true)
-  }
-
-  async function save() {
-    if (!draft.id.trim() || !draft.label.trim()) {
-      setFlash({ tone: 'error', text: 'أدخلي المعرّف والاسم.' })
-      return
-    }
-    setSaving(true)
-    const result = await upsertAdminSize({
+  usePageTitle('المقاسات والأسعار | مستكة')
+  const crud = useCatalogCrud<AdminCakeSizeRow>({
+    list: listAdminSizes,
+    upsert: upsertAdminSize,
+    prepare: (draft) => ({
       ...draft,
       id: draft.id.trim(),
       price: Number(draft.price) || 0,
       sort_order: Number(draft.sort_order) || 0,
       servings_min: draft.servings_min == null || Number.isNaN(Number(draft.servings_min)) ? null : Number(draft.servings_min),
       servings_max: draft.servings_max == null || Number.isNaN(Number(draft.servings_max)) ? null : Number(draft.servings_max),
-    })
-    setSaving(false)
-    setFlash({ tone: result.ok ? 'success' : 'error', text: result.message })
-    if (result.ok) {
-      setEditing(false)
-      await load()
-    }
+    }),
+    validate: (draft) => ({
+      id: draft.id.trim() ? undefined : 'أدخلي المعرّف.',
+      label: draft.label.trim() ? undefined : 'أدخلي اسم المقاس.',
+    }),
+  })
+  const filter = useCatalogFilter(crud.rows, (row) => [row.label, row.id, row.servings_label])
+
+  function startNew() {
+    crud.open({ ...empty, sort_order: (crud.rows.at(-1)?.sort_order ?? 0) + 10 }, null)
   }
 
-  return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
-      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-display text-4xl text-rose-deep">المقاسات والأسعار</h2>
-          <p className="mt-2 text-muted">مصدر أسعار التورت في الطلبات والكتالوج.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button type="button" variant="secondary" onClick={() => void load()}>
-            تحديث
-          </Button>
-          <Button type="button" onClick={startNew}>
-            إضافة مقاس
-          </Button>
-        </div>
-      </header>
+  const groups = (['single', 'two-tier'] as const)
+    .map((group) => ({ group, rows: filter.filtered.filter((r) => r.pricing_group === group) }))
+    .filter((g) => g.rows.length > 0)
 
-      {flash ? <div className="mb-4"><AdminAlert tone={flash.tone} onClose={clearFlash}>{flash.text}</AdminAlert></div> : null}
-      {loading ? <p className="text-muted">جاري التحميل...</p> : null}
-      {error ? <p role="alert" className="text-rose-deep">{error}</p> : null}
-      {!loading && !error && rows.length === 0 ? (
-        <p className="rounded-3xl border border-dashed border-line bg-paper p-8 text-center text-muted">لا توجد مقاسات.</p>
+  const draft = crud.draft
+
+  return (
+    <AdminPage>
+      <AdminPageHeader
+        title="المقاسات والأسعار"
+        description="مصدر أسعار التورت في الطلبات والكتالوج. المقاسات غير المفعّلة لا تظهر للعملاء."
+        actions={
+          <>
+            <AdminButton icon={<IconRefresh size={18} />} loading={crud.refreshing} disabled={crud.loading} onClick={() => void crud.load(true)}>
+              تحديث
+            </AdminButton>
+            <AdminButton variant="primary" icon={<IconPlus size={18} />} onClick={startNew}>
+              إضافة مقاس
+            </AdminButton>
+          </>
+        }
+      />
+
+      {!crud.loading && !crud.error && crud.rows.length > 0 ? (
+        <CatalogToolbar
+          id="sizes-search"
+          placeholder="ابحثي بالمقاس أو المعرّف"
+          filter={filter}
+          total={crud.rows.length}
+          visible={filter.filtered.length}
+          noun="مقاس"
+        />
       ) : null}
 
-      <ul className="grid gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="rounded-3xl border border-line bg-paper p-4 shadow-soft">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-semibold text-ink">{row.label} <span className="text-muted">({row.id})</span></p>
-                <p className="mt-1 text-sm text-muted">
-                  {row.pricing_group === 'single' ? 'طبقة واحدة' : 'طابقين'} · {row.servings_label} · {formatEgp(Number(row.price))}
-                  {row.enabled ? '' : ' · معطّل'}
-                </p>
-              </div>
-              <Button type="button" variant="secondary" onClick={() => startEdit(row)}>
-                تعديل
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <CatalogResults
+        loading={crud.loading}
+        error={crud.error}
+        onRetry={() => void crud.load(true)}
+        retrying={crud.refreshing}
+        total={crud.rows.length}
+        visible={filter.filtered.length}
+        emptyTitle="لا توجد مقاسات"
+        emptyDescription="أضيفي أول مقاس وسعره ليظهر في الطلب والكتالوج."
+        emptyIcon={<IconRuler />}
+        addLabel="إضافة مقاس"
+        onAdd={startNew}
+        onClearFilters={() => {
+          filter.setQuery('')
+          filter.setEnabled('all')
+        }}
+        table={
+          <div className="grid gap-5">
+            {groups.map(({ group, rows }) => (
+              <section key={group} aria-labelledby={`group-${group}`}>
+                <h2 id={`group-${group}`} className="mb-2 text-sm font-bold text-ink">
+                  {GROUP_LABELS[group]} <span className="font-semibold text-muted">({rows.length})</span>
+                </h2>
+                <AdminTable
+                  caption={`مقاسات ${GROUP_LABELS[group]}`}
+                  head={
+                    <>
+                      <Th>المقاس</Th>
+                      <Th>عدد الأفراد</Th>
+                      <Th className="text-end">السعر</Th>
+                      <Th className="text-center">الترتيب</Th>
+                      <Th>الحالة</Th>
+                      <Th>
+                        <span className="sr-only">إجراء</span>
+                      </Th>
+                    </>
+                  }
+                >
+                  {rows.map((row) => (
+                    <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
+                      <Td>
+                        <p className="font-bold">{row.label}</p>
+                        <IdText>{row.id}</IdText>
+                      </Td>
+                      <Td>{row.servings_label || '—'}</Td>
+                      <Td className="text-end font-bold whitespace-nowrap tabular-nums">{formatEgp(Number(row.price))}</Td>
+                      <Td className="text-center text-muted tabular-nums">{row.sort_order}</Td>
+                      <Td>
+                        <EnabledBadge enabled={row.enabled} />
+                      </Td>
+                      <Td className="w-px text-end">
+                        <EditButton label={`تعديل ${row.label}`} onClick={() => crud.open({ ...row }, row)} />
+                      </Td>
+                    </Tr>
+                  ))}
+                </AdminTable>
+              </section>
+            ))}
+          </div>
+        }
+        list={
+          <div className="grid gap-5">
+            {groups.map(({ group, rows }) => (
+              <section key={group} aria-labelledby={`group-m-${group}`}>
+                <h2 id={`group-m-${group}`} className="mb-2 text-sm font-bold text-ink">
+                  {GROUP_LABELS[group]} <span className="font-semibold text-muted">({rows.length})</span>
+                </h2>
+                <AdminList>
+                  {rows.map((row) => (
+                    <CatalogListItem
+                      key={row.id}
+                      title={row.label}
+                      subtitle={<IdText>{row.id}</IdText>}
+                      meta={
+                        <>
+                          <span className="font-bold tabular-nums">{formatEgp(Number(row.price))}</span>
+                          {row.servings_label ? <span className="text-muted"> · يكفي {row.servings_label}</span> : null}
+                        </>
+                      }
+                      badges={<EnabledBadge enabled={row.enabled} />}
+                      editLabel={`تعديل ${row.label}`}
+                      onEdit={() => crud.open({ ...row }, row)}
+                    />
+                  ))}
+                </AdminList>
+              </section>
+            ))}
+          </div>
+        }
+      />
 
-      {editing ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-line bg-paper p-6 shadow-soft">
-            <h3 className="font-display text-2xl text-rose-deep">{draft.id && rows.some((r) => r.id === draft.id) ? 'تعديل مقاس' : 'مقاس جديد'}</h3>
-            <div className="mt-4 grid gap-3">
-              <TextField id="size-id" label="المعرّف" dir="ltr" className="text-start" value={draft.id} onChange={(e) => setDraft({ ...draft, id: e.target.value })} hint="مثل single-24" />
-              <TextField id="size-label" label="الاسم" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
-              <SelectField id="size-group" label="النوع" value={draft.pricing_group} onChange={(e) => setDraft({ ...draft, pricing_group: e.target.value as 'single' | 'two-tier' })}>
-                <option value="single">طبقة واحدة</option>
-                <option value="two-tier">طابقين</option>
-              </SelectField>
-              <TextField id="size-servings-label" label="وصف الأفراد" value={draft.servings_label} onChange={(e) => setDraft({ ...draft, servings_label: e.target.value })} />
-              <TextField id="size-price" label="السعر (جنيه)" type="number" dir="ltr" className="text-start" value={String(draft.price)} onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })} />
-              <TextField id="size-sort" label="ترتيب العرض" type="number" dir="ltr" className="text-start" value={String(draft.sort_order)} onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })} />
-              <label className="flex min-h-11 items-center gap-2 font-semibold">
-                <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
-                مفعّل في الموقع
-              </label>
-            </div>
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button type="button" variant="ghost" disabled={saving} onClick={() => setEditing(false)}>إلغاء</Button>
-              <Button type="button" disabled={saving} onClick={() => void save()}>{saving ? 'جارٍ الحفظ...' : 'حفظ'}</Button>
+      <CatalogEditor
+        crud={crud}
+        newTitle="مقاس جديد"
+        editTitle="تعديل المقاس"
+        disableTitle="تعطيل المقاس؟"
+        disableBody="لن يظهر هذا المقاس للعملاء في الطلب والكتالوج بعد الحفظ. يمكنك إعادة تفعيله لاحقًا."
+      >
+        {draft ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <AdminTextField
+              id="size-label"
+              label="اسم المقاس"
+              required
+              value={draft.label}
+              error={crud.fieldErrors.label}
+              hint="مثل: 24 سم"
+              onChange={(e) => crud.update({ label: e.target.value })}
+            />
+            <AdminTextField
+              id="size-id"
+              label="المعرّف"
+              required
+              dir="ltr"
+              className="text-start"
+              value={draft.id}
+              error={crud.fieldErrors.id}
+              hint={crud.isNew ? `${ID_HINT_NEW} مثل single-24` : ID_HINT_EDIT}
+              onChange={(e) => crud.update({ id: e.target.value })}
+            />
+            <AdminSelectField
+              id="size-group"
+              label="النوع"
+              value={draft.pricing_group}
+              onChange={(e) => crud.update({ pricing_group: e.target.value as AdminCakeSizeRow['pricing_group'] })}
+            >
+              <option value="single">طبقة واحدة</option>
+              <option value="two-tier">طابقين</option>
+            </AdminSelectField>
+            <AdminTextField
+              id="size-servings-label"
+              label="وصف الأفراد"
+              value={draft.servings_label}
+              hint="مثل: 20 - 23 فرد"
+              onChange={(e) => crud.update({ servings_label: e.target.value })}
+            />
+            <AdminTextField
+              id="size-price"
+              label="السعر (جنيه)"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              dir="ltr"
+              className="text-start"
+              value={String(draft.price)}
+              onChange={(e) => crud.update({ price: Number(e.target.value) })}
+            />
+            <AdminTextField
+              id="size-sort"
+              label="ترتيب العرض"
+              type="number"
+              inputMode="numeric"
+              dir="ltr"
+              className="text-start"
+              value={String(draft.sort_order)}
+              hint={SORT_HINT}
+              onChange={(e) => crud.update({ sort_order: Number(e.target.value) })}
+            />
+            <div className="sm:col-span-2">
+              <AdminSwitch
+                id="size-enabled"
+                label="مفعّل في الموقع"
+                description="عند التعطيل يختفي المقاس من الطلب والكتالوج."
+                checked={draft.enabled}
+                onChange={(enabled) => crud.update({ enabled })}
+              />
             </div>
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : null}
+      </CatalogEditor>
+    </AdminPage>
   )
 }

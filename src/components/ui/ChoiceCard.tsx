@@ -18,7 +18,7 @@ export function ChoiceCard({
   return (
     <label
       className={cx(
-        'flex min-h-12 cursor-pointer items-start gap-3 rounded-2xl border p-4 transition',
+        'flex min-h-12 cursor-pointer items-start gap-3 rounded-2xl border p-4 transition duration-200 motion-reduce:transition-none',
         checked ? 'border-rose bg-blush/80 shadow-soft' : 'border-line bg-paper hover:border-gold',
       )}
     >

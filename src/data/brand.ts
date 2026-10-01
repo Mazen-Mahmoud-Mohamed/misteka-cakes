@@ -1,9 +1,9 @@
-import logo from '@/assets/brand/logo.jpeg'
+import logo from '@/assets/brand/logo.png'
 
 export const brand = {
-  nameAr: 'مستيكا',
-  nameEn: 'Misteka Cakes',
+  nameAr: 'مستكة',
+  nameEn: 'Mestika',
   tagline: 'مستكة في كل تفاصيلها',
   logo,
-  logoAlt: 'شعار مستيكا',
+  logoAlt: 'شعار مستكة',
 } as const

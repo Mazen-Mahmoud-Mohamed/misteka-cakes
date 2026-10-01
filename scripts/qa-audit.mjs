@@ -141,7 +141,7 @@ async function main() {
   // mobile: open menu first
   const menuBtn = page.getByRole('button', { name: /القائمة/ })
   if (await menuBtn.isVisible()) await menuBtn.click()
-  await page.getByRole('button', { name: 'الأسعار' }).click()
+  await page.getByRole('link', { name: 'الأسعار' }).click()
   await page.waitForTimeout(700)
   const prices = await dumpPrices(page)
   for (const [key, ok] of Object.entries(prices)) {

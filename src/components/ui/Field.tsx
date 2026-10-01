@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTML
 import { cx } from '@/utils/cx'
 
 export const controlClass =
-  'min-h-12 w-full rounded-2xl border border-line bg-paper px-4 text-base text-ink outline-none transition focus-visible:border-rose focus-visible:ring-2 focus-visible:ring-rose/30'
+  'min-h-12 w-full rounded-2xl border border-line bg-paper px-4 text-base text-ink outline-none transition duration-200 focus-visible:border-rose focus-visible:ring-2 focus-visible:ring-rose/30 motion-reduce:transition-none'
 
 function Shell({
   id,

@@ -22,7 +22,7 @@ export function formatOrderText(order: Order, lines: PriceLine[]): string {
     .join('\n')
 
   return [
-    `طلب مستيكا ${order.orderNumber}`,
+    `طلب مستكة ${order.orderNumber}`,
     `الاسم: ${order.customerName}`,
     `الموبايل: ${order.phone}`,
     `الخدمة: ${order.serviceType === 'delivery' ? 'توصيل' : 'استلام'}`,

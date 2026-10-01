@@ -227,7 +227,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
         {STEP_TITLES.map((title, index) => (
           <li key={title} className="grid gap-2">
             <span className={cx('h-1 rounded-full', index <= step ? 'bg-rose' : 'bg-line')} />
-            <span className={cx('text-xs sm:text-sm', index === step ? 'font-semibold text-rose-deep' : 'text-muted')}>
+            <span className={cx('text-xs leading-snug sm:text-sm', index === step ? 'font-semibold text-rose-deep' : 'text-muted')}>
               {title}
             </span>
           </li>

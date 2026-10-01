@@ -3,7 +3,7 @@ import { ButtonLink } from '@/components/ui/Button'
 import { usePageTitle } from '@/hooks/usePageTitle'
 
 export function NotFoundPage() {
-  usePageTitle('الصفحة غير موجودة | مستيكا')
+  usePageTitle('الصفحة غير موجودة | مستكة')
 
   return (
     <Container className="py-20 text-center">

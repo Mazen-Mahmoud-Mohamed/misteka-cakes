@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { brand } from '@/data/brand'
 import { socialLinks } from '@/data/socialLinks'
 import { Container } from '@/components/layout/Container'
-import { getPricingNotes, listZones } from '@/services/catalogService'
+import { listZones } from '@/services/catalogService'
 
 const iconClass = 'size-5 shrink-0'
 
@@ -51,43 +51,41 @@ export function SiteFooter() {
     .join(' و')
 
   return (
-    <footer className="mt-8 border-t border-line bg-cream/70">
-      <Container className="grid gap-8 py-12 md:grid-cols-[1.2fr_1fr]">
-        <div>
-          <img src={brand.logo} alt={brand.logoAlt} className="h-auto w-40 object-contain" />
-          <p className="mt-4 font-display text-3xl text-rose-deep">{brand.nameAr}</p>
-          <p className="font-latin text-xl text-gold">{brand.nameEn}</p>
-          <p className="mt-3 max-w-sm leading-8 text-muted">{brand.tagline}</p>
-          <nav className="mt-5 flex flex-wrap items-center gap-2" aria-label="وسائل التواصل">
-            {socialItems.map(({ key, label, href, Icon }) => (
-              <a
-                key={key}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={label}
-                title={label}
-                className="inline-flex size-11 items-center justify-center rounded-full border border-line bg-paper text-ink transition hover:border-gold hover:text-rose-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose"
-              >
-                <Icon />
-              </a>
-            ))}
-          </nav>
-        </div>
-        <div className="grid gap-3 text-sm leading-7 text-muted">
-          <p>التوصيل حاليًا داخل {zones}.</p>
-          {getPricingNotes().map((note) => (
-            <p key={note}>{note}</p>
+    <footer className="border-t border-line/80 bg-paper">
+      <Container className="py-14 text-center sm:py-16">
+        <img src={brand.logo} alt={brand.logoAlt} className="mx-auto size-24 rounded-full object-cover" />
+        <p className="mt-4 font-display text-3xl text-rose-deep">{brand.nameAr}</p>
+        <p className="font-latin text-lg tracking-[0.18em] text-[#8a6532]">{brand.nameEn}</p>
+        <p className="mt-2 text-muted">{brand.tagline}</p>
+
+        <nav className="mt-6 flex flex-wrap items-center justify-center gap-3" aria-label="وسائل التواصل">
+          {socialItems.map(({ key, label, href, Icon }) => (
+            <a
+              key={key}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={label}
+              title={label}
+              className="inline-flex size-11 items-center justify-center rounded-full border border-line bg-ivory text-ink transition duration-200 hover:border-gold hover:text-rose-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose motion-reduce:transition-none"
+            >
+              <Icon />
+            </a>
           ))}
-          <nav className="mt-2 flex flex-wrap gap-3 font-semibold text-ink" aria-label="تذييل">
-            <Link to="/catalog" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
-              التورت
-            </Link>
-            <Link to="/order" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
-              الطلب
-            </Link>
-          </nav>
-        </div>
+        </nav>
+
+        <nav className="mt-4 flex flex-wrap justify-center gap-2 font-semibold text-ink" aria-label="تذييل">
+          <Link to="/catalog" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
+            التورت
+          </Link>
+          <Link to="/order" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
+            الطلب
+          </Link>
+        </nav>
+
+        <p className="mx-auto mt-8 max-w-2xl border-t border-line/80 pt-6 text-sm leading-7 text-muted">
+          التوصيل حاليًا داخل {zones}.
+        </p>
       </Container>
     </footer>
   )

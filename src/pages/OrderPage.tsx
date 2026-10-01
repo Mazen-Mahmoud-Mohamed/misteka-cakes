@@ -16,7 +16,7 @@ function readInitial(params: URLSearchParams): Partial<OrderDraft> {
 }
 
 export function OrderPage() {
-  usePageTitle('طلب تورتة | مستيكا')
+  usePageTitle('طلب تورتة | مستكة')
   const [params] = useSearchParams()
 
   return (
@@ -27,7 +27,7 @@ export function OrderPage() {
           نبدأ بالموعد والمنطقة، ثم التصميم والحشوة. الحجز قبل الاستلام بثلاثة أيام على الأقل.
         </p>
       </header>
-      <div className="mx-auto max-w-3xl rounded-[32px] border border-line bg-paper p-4 shadow-soft sm:p-8">
+      <div className="mx-auto max-w-3xl rounded-3xl border border-line bg-paper p-4 shadow-soft sm:p-8">
         <OrderWizard key={params.toString()} initial={readInitial(params)} />
       </div>
     </Container>

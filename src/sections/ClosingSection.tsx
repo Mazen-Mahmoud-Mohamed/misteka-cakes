@@ -1,17 +1,15 @@
 import { Container } from '@/components/layout/Container'
 import { ButtonLink } from '@/components/ui/Button'
-import { Ornament } from '@/components/ui/SectionHeading'
 import { content } from '@/data/content'
 
 export function ClosingSection() {
   return (
-    <section className="py-14 sm:py-20">
+    <section className="pb-16 sm:pb-24">
       <Container>
-        <div className="rounded-[32px] border border-gold/40 bg-paper px-6 py-12 text-center shadow-soft sm:px-12">
-          <h2 className="font-display text-4xl text-rose-deep sm:text-5xl">{content.closing.title}</h2>
-          <Ornament />
+        <div className="mx-auto max-w-3xl border-t border-gold/40 pt-12 text-center sm:pt-14">
+          <h2 className="font-display text-3xl text-rose-deep sm:text-4xl">{content.closing.title}</h2>
           <p className="mx-auto mt-4 max-w-xl leading-8 text-muted">{content.closing.text}</p>
-          <ButtonLink to="/order" className="mt-6">
+          <ButtonLink to="/order" className="mt-8 sm:min-w-56">
             {content.closing.cta}
           </ButtonLink>
         </div>

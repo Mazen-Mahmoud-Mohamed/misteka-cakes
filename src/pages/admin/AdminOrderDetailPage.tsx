@@ -1,9 +1,26 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { AdminAlert, useFlash } from '@/components/admin/AdminAlert'
+import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { AdminAlert, AdminToast, useFlash } from '@/components/admin/AdminAlert'
+import { StatusBadge } from '@/components/admin/AdminBadge'
+import { AdminButton, AdminButtonLink } from '@/components/admin/AdminButton'
+import { AdminCard, AdminDetail, AdminDetailList, AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
+import { AdminEmptyState, AdminErrorState, Skeleton } from '@/components/admin/AdminStates'
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
-import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Button } from '@/components/ui/Button'
+import {
+  IconArrowBack,
+  IconCake,
+  IconExternal,
+  IconFile,
+  IconImage,
+  IconOrders,
+  IconReceipt,
+  IconRefresh,
+  IconTruck,
+  IconUser,
+  Spinner,
+} from '@/components/admin/icons'
+import { formatCreatedAt, formatPickupDate, orderTotalLabel } from '@/components/admin/OrderRows'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import {
   getAdminOrder,
   getReferenceSignedUrl,
@@ -11,23 +28,33 @@ import {
 } from '@/services/admin/adminOrderService'
 import type { AdminOrder } from '@/types/admin'
 import type { OrderStatus } from '@/types'
-import { formatArabicDate, formatTimeLabel } from '@/utils/dates'
-import { chargeAmountLabel, formatEgp } from '@/utils/format'
+import { formatTimeLabel } from '@/utils/dates'
+import { chargeAmountLabel } from '@/utils/format'
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="rounded-3xl border border-line bg-paper p-5 shadow-soft sm:p-6">
-      <h3 className="font-display text-2xl text-rose-deep">{title}</h3>
-      <div className="mt-4 grid gap-3 text-sm leading-7">{children}</div>
-    </section>
-  )
+const DESIGN_MODE_LABELS: Record<AdminOrder['designMode'], string> = {
+  catalog: 'من الكتالوج',
+  similar: 'مشابه لتصميم',
+  custom: 'تصميم مخصص',
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function DetailSkeleton() {
   return (
-    <div className="grid gap-1 sm:grid-cols-[8rem_1fr] sm:gap-4">
-      <dt className="text-muted">{label}</dt>
-      <dd className="font-semibold text-ink">{value || '—'}</dd>
+    <div role="status" className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <span className="sr-only">جاري تحميل الطلب</span>
+      {[0, 1].map((col) => (
+        <div key={col} className="grid content-start gap-4">
+          {Array.from({ length: col ? 2 : 3 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-line bg-paper p-5">
+              <Skeleton className="h-4 w-28" />
+              <div className="mt-5 grid gap-3">
+                <Skeleton className="h-3.5 w-3/4" />
+                <Skeleton className="h-3.5 w-1/2" />
+                <Skeleton className="h-3.5 w-2/3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -41,8 +68,23 @@ export function AdminOrderDetailPage() {
   const [busy, setBusy] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imageError, setImageError] = useState('')
+  const [imageLoading, setImageLoading] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null)
   const { flash, setFlash, clearFlash } = useFlash()
+  usePageTitle(order ? `الطلب ${order.orderNumber} | مستكة` : 'تفاصيل الطلب | مستكة')
+
+  async function loadImage(path: string | null) {
+    if (!path) {
+      setImageUrl(null)
+      setImageError('')
+      return
+    }
+    setImageLoading(true)
+    const signed = await getReferenceSignedUrl(path)
+    setImageUrl(signed.url)
+    setImageError(signed.error || '')
+    setImageLoading(false)
+  }
 
   async function load() {
     setLoading(true)
@@ -56,15 +98,7 @@ export function AdminOrderDetailPage() {
     setOrder(result.order)
     setError('')
     setLoading(false)
-
-    if (result.order.referenceImage) {
-      const signed = await getReferenceSignedUrl(result.order.referenceImage)
-      setImageUrl(signed.url)
-      setImageError(signed.error || '')
-    } else {
-      setImageUrl(null)
-      setImageError('')
-    }
+    await loadImage(result.order.referenceImage)
   }
 
   useEffect(() => {
@@ -88,181 +122,269 @@ export function AdminOrderDetailPage() {
     await load()
   }
 
+  const finalNote = 'هذه حالة نهائية ولا يمكن التراجع عنها من لوحة التحكم.'
   const confirmCopy =
     pendingStatus === 'confirmed'
-      ? { title: 'تأكيد الطلب', body: 'هل أنت متأكد من تأكيد هذا الطلب؟', label: 'تأكيد الطلب' }
+      ? {
+          title: 'تأكيد الطلب؟',
+          body: 'سيتم تغيير حالة الطلب إلى «مؤكد»، ولن يعود إلى قيد المراجعة بعد ذلك.',
+          label: 'تأكيد الطلب',
+        }
       : pendingStatus === 'rejected'
-        ? { title: 'رفض الطلب', body: 'هل أنت متأكد من رفض هذا الطلب؟', label: 'رفض الطلب', danger: true }
+        ? { title: 'رفض الطلب؟', body: `سيتم تغيير حالة الطلب إلى «مرفوض». ${finalNote}`, label: 'رفض الطلب', danger: true }
         : pendingStatus === 'cancelled'
-          ? { title: 'إلغاء الطلب', body: 'هل أنت متأكد من إلغاء هذا الطلب المؤكد؟', label: 'إلغاء الطلب', danger: true }
+          ? {
+              title: 'إلغاء الطلب؟',
+              body:
+                order?.status === 'confirmed'
+                  ? `هذا الطلب مؤكد حاليًا. سيتم تغيير حالته إلى «ملغى». ${finalNote}`
+                  : `سيتم تغيير حالة الطلب إلى «ملغى». ${finalNote}`,
+              label: 'إلغاء الطلب',
+              danger: true,
+            }
           : null
 
+  const notFound = !loading && error === 'الطلب غير موجود.'
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-      <Link to="/admin/orders" className="text-sm font-semibold text-rose-deep hover:underline">
-        ← العودة للطلبات
-      </Link>
+    <AdminPage>
+      <AdminButtonLink to="/admin/orders" size="sm" variant="ghost" className="-ms-3 mb-3" icon={<IconArrowBack size={16} />}>
+        العودة إلى الطلبات
+      </AdminButtonLink>
 
-      {flash ? (
-        <div className="mt-4">
-          <AdminAlert tone={flash.tone} onClose={clearFlash}>
-            {flash.text}
-          </AdminAlert>
-        </div>
+      {loading ? (
+        <>
+          <div className="mb-6 grid gap-2">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-3.5 w-40" />
+          </div>
+          <DetailSkeleton />
+        </>
       ) : null}
 
-      {loading ? <p className="mt-6 text-muted">جاري تحميل الطلب...</p> : null}
-      {error ? (
-        <div className="mt-6">
-          <AdminAlert tone="error">{error}</AdminAlert>
-        </div>
+      {notFound ? (
+        <AdminEmptyState
+          icon={<IconOrders />}
+          title="الطلب غير موجود"
+          description="ربما تم إدخال رابط غير صحيح. ارجعي إلى قائمة الطلبات للبحث عنه."
+          action={<AdminButtonLink to="/admin/orders">قائمة الطلبات</AdminButtonLink>}
+        />
       ) : null}
+
+      {!loading && error && !notFound ? <AdminErrorState description={error} onRetry={() => void load()} /> : null}
 
       {!loading && order ? (
         <>
-          <header className="mt-4 mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-gold">{order.orderNumber}</p>
-              <h2 className="mt-1 font-display text-4xl text-rose-deep">تفاصيل الطلب</h2>
-              <p className="mt-2 text-sm text-muted">
-                أُنشئ{' '}
-                {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }).format(
-                  new Date(order.createdAt),
-                )}
-              </p>
-            </div>
-            <StatusBadge status={order.status} />
-          </header>
+          <AdminPageHeader
+            title={
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span>تفاصيل الطلب</span>
+                <span className="text-rose-deep tabular-nums" dir="ltr">
+                  {order.orderNumber}
+                </span>
+                <StatusBadge status={order.status} className="h-8 px-3 text-sm" />
+              </span>
+            }
+            description={`أُنشئ في ${formatCreatedAt(order.createdAt)}`}
+          />
 
-          <div className="grid gap-4">
-            <Section title="بيانات العميل">
-              <dl className="grid gap-3">
-                <Row label="الاسم" value={order.customerName} />
-                <Row label="رقم الهاتف" value={order.phone} />
-                <Row label="الخدمة" value={order.serviceType === 'delivery' ? 'توصيل' : 'استلام'} />
-                <Row label="المنطقة" value={order.area ?? 'استلام'} />
-                <Row label="تفاصيل التوصيل" value={order.addressNotes || 'غير متوفرة'} />
-              </dl>
-            </Section>
-
-            <Section title="موعد الاستلام">
-              <dl className="grid gap-3">
-                <Row label="التاريخ" value={formatArabicDate(order.date)} />
-                <Row label="الوقت" value={formatTimeLabel(order.time)} />
-              </dl>
-            </Section>
-
-            <Section title="تفاصيل التورتة">
-              <dl className="grid gap-3">
-                <Row label="التورتة" value={order.cakeName ?? 'تصميم مخصص'} />
-                <Row label="المقاس" value={order.size} />
-                <Row label="عدد الأفراد" value={`${order.servings} فرد`} />
-                <Row label="الحشوة" value={order.filling || '—'} />
-                <Row
-                  label="الإضافات"
-                  value={order.extras.length ? order.extras.map((e) => e.name).join('، ') : 'بدون'}
-                />
-                <Row
-                  label="وضع التصميم"
-                  value={
-                    order.designMode === 'catalog'
-                      ? 'من الكتالوج'
-                      : order.designMode === 'similar'
-                        ? 'مشابه'
-                        : 'مخصص'
-                  }
-                />
-              </dl>
-            </Section>
-
-            <Section title="التصميم والملاحظات">
-              <p className="whitespace-pre-wrap text-ink">{order.notes || 'لا توجد ملاحظات.'}</p>
-            </Section>
-
-            <Section title="الصورة المرجعية">
-              {!order.referenceImage ? (
-                <p className="text-muted">لا توجد صورة مرجعية محفوظة لهذا الطلب.</p>
-              ) : imageError ? (
-                <p className="text-rose-deep">{imageError}</p>
-              ) : imageUrl ? (
-                <div className="grid gap-3">
-                  <img
-                    src={imageUrl}
-                    alt="الصورة المرجعية للطلب"
-                    className="max-h-80 rounded-2xl border border-line object-contain"
-                  />
-                  <a
-                    href={imageUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-semibold text-rose-deep hover:underline"
-                  >
-                    فتح الصورة في نافذة جديدة
-                  </a>
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <aside className="grid gap-4 lg:sticky lg:top-20 lg:col-start-2 lg:row-start-1" aria-label="الحالة والعميل">
+              <AdminCard title="حالة الطلب" icon={<IconOrders size={18} />}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-muted">الحالة الحالية</span>
+                  <StatusBadge status={order.status} />
                 </div>
-              ) : (
-                <p className="text-muted">جاري تجهيز عرض الصورة...</p>
-              )}
-              {order.referenceImage ? (
-                <p className="mt-2 text-xs text-muted" dir="ltr">
-                  مسار خاص (غير عام)
+                <p className="mt-3 text-[0.8125rem] leading-6 text-muted">
+                  {order.status === 'pending_review'
+                    ? 'الطلب بانتظار مراجعتك. راجعي التفاصيل ثم أكّدي الطلب أو ارفضيه.'
+                    : order.status === 'confirmed'
+                      ? 'الطلب مؤكد. يمكن إلغاؤه فقط عند الحاجة.'
+                      : 'هذه حالة نهائية ولا توجد إجراءات إضافية.'}
                 </p>
-              ) : null}
-            </Section>
 
-            <Section title="تفصيل السعر (لقطة الطلب)">
-              {order.priceLines.length === 0 ? (
-                <p className="text-muted">لا توجد بنود سعر محفوظة.</p>
-              ) : (
-                <ul className="grid gap-2">
-                  {order.priceLines.map((line) => (
-                    <li key={line.id} className="flex items-start justify-between gap-4 border-b border-line/60 py-2">
-                      <div>
-                        <p className="font-semibold">{line.label}</p>
-                        {line.note ? <p className="text-xs text-muted">{line.note}</p> : null}
-                      </div>
-                      <p className="shrink-0 font-semibold">{chargeAmountLabel(line.status, line.amount)}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-4 flex items-center justify-between border-t border-gold/40 pt-4">
-                <p className="font-display text-xl text-rose-deep">الإجمالي</p>
-                <p className="font-semibold text-ink">
-                  {order.totalPrice == null ? 'يُحدَّد لاحقًا' : formatEgp(order.totalPrice)}
+                {actionError ? (
+                  <AdminAlert tone="error" className="mt-3">
+                    {actionError}
+                  </AdminAlert>
+                ) : null}
+
+                {order.status === 'pending_review' || order.status === 'confirmed' ? (
+                  <div className="mt-4 grid gap-2">
+                    {order.status === 'pending_review' ? (
+                      <>
+                        <AdminButton variant="primary" disabled={busy} onClick={() => setPendingStatus('confirmed')}>
+                          تأكيد الطلب
+                        </AdminButton>
+                        <AdminButton variant="dangerOutline" disabled={busy} onClick={() => setPendingStatus('rejected')}>
+                          رفض الطلب
+                        </AdminButton>
+                        <AdminButton variant="ghost" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
+                          إلغاء الطلب
+                        </AdminButton>
+                      </>
+                    ) : (
+                      <AdminButton variant="dangerOutline" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
+                        إلغاء الطلب المؤكد
+                      </AdminButton>
+                    )}
+                  </div>
+                ) : null}
+              </AdminCard>
+
+              <AdminCard title="العميل" icon={<IconUser size={18} />}>
+                <AdminDetailList>
+                  <AdminDetail label="الاسم">{order.customerName || '—'}</AdminDetail>
+                  <AdminDetail label="رقم الهاتف">
+                    {order.phone ? (
+                      <a
+                        href={`tel:${order.phone}`}
+                        dir="ltr"
+                        className="-my-3 inline-flex min-h-11 items-center text-rose-deep tabular-nums hover:underline"
+                      >
+                        {order.phone}
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </AdminDetail>
+                </AdminDetailList>
+              </AdminCard>
+
+              <AdminCard title="ملخص الطلب" icon={<IconReceipt size={18} />}>
+                <AdminDetailList>
+                  <AdminDetail label="رقم الطلب" ltr>
+                    {order.orderNumber}
+                  </AdminDetail>
+                  <AdminDetail label="تاريخ الإنشاء">{formatCreatedAt(order.createdAt)}</AdminDetail>
+                  <AdminDetail label="الإجمالي">
+                    <span className="text-base tabular-nums">{orderTotalLabel(order)}</span>
+                  </AdminDetail>
+                </AdminDetailList>
+              </AdminCard>
+            </aside>
+
+            <div className="grid min-w-0 gap-4 lg:col-start-1 lg:row-start-1">
+              <AdminCard title="التورتة" icon={<IconCake size={18} />}>
+                <AdminDetailList>
+                  <AdminDetail label="التصميم">{order.cakeName ?? 'تصميم مخصص'}</AdminDetail>
+                  <AdminDetail label="نوع التصميم">{DESIGN_MODE_LABELS[order.designMode] ?? '—'}</AdminDetail>
+                  <AdminDetail label="المقاس">{order.size || '—'}</AdminDetail>
+                  <AdminDetail label="عدد الأفراد">{`${order.servings} فرد`}</AdminDetail>
+                  <AdminDetail label="الحشوة">{order.filling || '—'}</AdminDetail>
+                  <AdminDetail label="الإضافات">
+                    {order.extras.length ? (
+                      <span className="flex flex-wrap gap-1.5">
+                        {order.extras.map((extra) => (
+                          <span key={extra.id || extra.name} className="rounded-md border border-line bg-ivory px-2 py-0.5 text-[0.8125rem]">
+                            {extra.name}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      'بدون'
+                    )}
+                  </AdminDetail>
+                </AdminDetailList>
+              </AdminCard>
+
+              <AdminCard title="التوصيل والموعد" icon={<IconTruck size={18} />}>
+                <AdminDetailList>
+                  <AdminDetail label="الخدمة">{order.serviceType === 'delivery' ? 'توصيل' : 'استلام'}</AdminDetail>
+                  <AdminDetail label="المنطقة">{order.area ?? 'استلام'}</AdminDetail>
+                  <AdminDetail label="تفاصيل العنوان">{order.addressNotes || 'غير متوفرة'}</AdminDetail>
+                  <AdminDetail label="تاريخ الاستلام">{formatPickupDate(order.date)}</AdminDetail>
+                  <AdminDetail label="وقت الاستلام">{formatTimeLabel(order.time)}</AdminDetail>
+                </AdminDetailList>
+              </AdminCard>
+
+              <AdminCard title="التصميم والملاحظات" icon={<IconFile size={18} />}>
+                <p className="text-sm leading-7 whitespace-pre-wrap text-ink">
+                  {order.notes || <span className="text-muted">لا توجد ملاحظات.</span>}
                 </p>
-              </div>
-              {order.pendingCharges.length ? (
-                <p className="mt-2 text-sm text-muted">بنود معلّقة: {order.pendingCharges.join('، ')}</p>
-              ) : null}
-            </Section>
-          </div>
+              </AdminCard>
 
-          {actionError ? (
-            <div className="mt-6">
-              <AdminAlert tone="error">{actionError}</AdminAlert>
+              <AdminCard
+                title="الصورة المرجعية"
+                description={order.referenceImage ? 'ملف خاص يُعرض برابط مؤقت لمدة دقيقتين.' : undefined}
+                icon={<IconImage size={18} />}
+                actions={
+                  order.referenceImage ? (
+                    <AdminButton
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconRefresh size={16} />}
+                      loading={imageLoading}
+                      onClick={() => void loadImage(order.referenceImage)}
+                    >
+                      تحديث الرابط
+                    </AdminButton>
+                  ) : null
+                }
+              >
+                {!order.referenceImage ? (
+                  <p className="text-sm text-muted">لا توجد صورة مرجعية محفوظة لهذا الطلب.</p>
+                ) : imageLoading && !imageUrl ? (
+                  <p role="status" className="flex items-center gap-2 text-sm text-muted">
+                    <Spinner /> جاري تجهيز عرض الصورة...
+                  </p>
+                ) : imageError ? (
+                  <AdminAlert tone="error">{imageError}</AdminAlert>
+                ) : imageUrl ? (
+                  <div className="grid gap-3">
+                    <a
+                      href={imageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block overflow-hidden rounded-lg border border-line bg-ivory"
+                    >
+                      <img
+                        src={imageUrl}
+                        alt="الصورة المرجعية للطلب"
+                        className="mx-auto max-h-96 w-auto object-contain"
+                        onError={() => setImageError('انتهت صلاحية رابط الصورة. اضغطي «تحديث الرابط».')}
+                      />
+                    </a>
+                    <a
+                      href={imageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-10 items-center gap-1.5 self-start text-sm font-semibold text-rose-deep hover:underline"
+                    >
+                      <IconExternal size={16} />
+                      فتح الصورة في نافذة جديدة
+                    </a>
+                  </div>
+                ) : null}
+              </AdminCard>
+
+              <AdminCard title="تفصيل السعر" description="لقطة الأسعار وقت إرسال الطلب." icon={<IconReceipt size={18} />}>
+                {order.priceLines.length === 0 ? (
+                  <p className="text-sm text-muted">لا توجد بنود سعر محفوظة.</p>
+                ) : (
+                  <ul className="divide-y divide-line/70">
+                    {order.priceLines.map((line) => (
+                      <li key={line.id} className="flex items-start justify-between gap-4 py-2.5 first:pt-0">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-ink">{line.label}</p>
+                          {line.note ? <p className="text-xs leading-6 text-muted">{line.note}</p> : null}
+                        </div>
+                        <p className="shrink-0 text-sm font-semibold text-ink tabular-nums">
+                          {chargeAmountLabel(line.status, line.amount)}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex items-center justify-between gap-4 border-t border-line pt-3">
+                  <p className="text-sm font-bold text-ink">الإجمالي</p>
+                  <p className="text-base font-bold text-rose-deep tabular-nums">{orderTotalLabel(order)}</p>
+                </div>
+                {order.pendingCharges.length ? (
+                  <p className="mt-2 text-[0.8125rem] leading-6 text-muted">بنود معلّقة: {order.pendingCharges.join('، ')}</p>
+                ) : null}
+              </AdminCard>
             </div>
-          ) : null}
-
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            {order.status === 'pending_review' ? (
-              <>
-                <Button type="button" disabled={busy} onClick={() => setPendingStatus('confirmed')}>
-                  تأكيد الطلب
-                </Button>
-                <Button type="button" variant="secondary" disabled={busy} onClick={() => setPendingStatus('rejected')}>
-                  رفض الطلب
-                </Button>
-                <Button type="button" variant="ghost" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
-                  إلغاء الطلب
-                </Button>
-              </>
-            ) : null}
-            {order.status === 'confirmed' ? (
-              <Button type="button" variant="secondary" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
-                إلغاء الطلب المؤكد
-              </Button>
-            ) : null}
           </div>
         </>
       ) : null}
@@ -273,12 +395,15 @@ export function AdminOrderDetailPage() {
           title={confirmCopy.title}
           body={confirmCopy.body}
           confirmLabel={confirmCopy.label}
+          cancelLabel="تراجع"
           danger={Boolean(confirmCopy.danger)}
           busy={busy}
           onCancel={() => setPendingStatus(null)}
           onConfirm={() => void applyStatus(pendingStatus)}
         />
       ) : null}
-    </div>
+
+      <AdminToast flash={flash} onClose={clearFlash} />
+    </AdminPage>
   )
 }

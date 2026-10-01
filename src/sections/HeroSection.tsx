@@ -6,27 +6,33 @@ import { content } from '@/data/content'
 
 export function HeroSection() {
   return (
-    <section className="py-8 sm:py-14">
-      <Container className="grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
-        <div className="rise">
-          <p className="font-latin text-2xl tracking-[0.14em] text-gold">{brand.nameEn}</p>
-          <img src={brand.logo} alt={brand.logoAlt} className="mt-4 h-auto w-52 object-contain sm:w-64" />
-          <h1 className="mt-5 font-display text-4xl leading-tight text-rose-deep sm:text-5xl">{brand.tagline}</h1>
-          <p className="mt-4 max-w-md text-lg leading-9 text-muted">{content.hero.intro}</p>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-            <ButtonLink to="/order" className="sm:min-w-44">
+    <section className="pt-8 pb-12 sm:pt-12 sm:pb-16 lg:pt-14 lg:pb-20">
+      <Container className="grid items-center gap-10 lg:grid-cols-[1fr_1.05fr] lg:gap-16">
+        <div className="rise text-center lg:text-start">
+          <img
+            src={brand.logo}
+            alt={brand.logoAlt}
+            className="mx-auto size-36 rounded-full object-cover sm:size-44 lg:mx-0"
+          />
+          <p className="mt-5 font-latin text-lg tracking-[0.18em] text-[#8a6532]">{brand.nameEn}</p>
+          <h1 className="mt-2 font-display text-4xl leading-tight text-rose-deep sm:text-5xl lg:text-[3.4rem]">
+            {brand.tagline}
+          </h1>
+          <p className="mx-auto mt-4 max-w-md text-lg leading-8 text-muted lg:mx-0">{content.hero.intro}</p>
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start">
+            <ButtonLink to="/order" className="sm:min-w-48">
               {content.hero.primaryCta}
             </ButtonLink>
-            <ButtonLink to="/catalog" variant="secondary" className="sm:min-w-44">
+            <ButtonLink to="/catalog" variant="secondary" className="sm:min-w-48">
               {content.hero.secondaryCta}
             </ButtonLink>
           </div>
         </div>
-        <div className="rise rounded-[32px] border border-gold/40 bg-gold-soft/20 p-2 shadow-soft">
+        <div className="rise mx-auto w-full max-w-md sm:max-w-lg lg:max-w-none">
           <img
             src={butterflies}
-            alt="تورتة وردية من مستيكا، مزينة بفراشات وخرز"
-            className="aspect-[4/5] w-full rounded-[26px] object-cover"
+            alt="تورتة وردية من مستكة، مزينة بفراشات وخرز"
+            className="aspect-[4/5] w-full rounded-3xl object-cover object-[center_30%] shadow-soft"
           />
         </div>
       </Container>

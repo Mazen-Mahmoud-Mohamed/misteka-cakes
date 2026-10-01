@@ -1,23 +1,59 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AdminAlert } from '@/components/admin/AdminAlert'
-import { StatusBadge } from '@/components/admin/StatusBadge'
-import { Button } from '@/components/ui/Button'
-import { SelectField, TextField } from '@/components/ui/Field'
+import { useSearchParams } from 'react-router-dom'
+import { AdminButton } from '@/components/admin/AdminButton'
+import { AdminPage, AdminPageHeader, adminSurfaceClass } from '@/components/admin/AdminCard'
+import { AdminSelect, adminControlClass } from '@/components/admin/AdminField'
+import { AdminEmptyState, AdminErrorState, AdminListSkeleton } from '@/components/admin/AdminStates'
+import { IconClose, IconOrders, IconRefresh, IconSearch } from '@/components/admin/icons'
+import { OrdersCardList, OrdersTable } from '@/components/admin/OrderRows'
+import { usePageTitle } from '@/hooks/usePageTitle'
 import { listAdminOrders } from '@/services/admin/adminOrderService'
 import type { AdminDateFilter, AdminOrder, AdminStatusFilter } from '@/types/admin'
-import { formatArabicDate, formatTimeLabel } from '@/utils/dates'
-import { formatEgp } from '@/utils/format'
+import { STATUS_LABELS } from '@/types/admin'
+import { cx } from '@/utils/cx'
+
+const STATUS_OPTIONS: AdminStatusFilter[] = ['all', 'pending_review', 'confirmed', 'rejected', 'cancelled']
+const DATE_OPTIONS: Array<{ value: AdminDateFilter; label: string }> = [
+  { value: 'all', label: 'كل المواعيد' },
+  { value: 'today', label: 'اليوم' },
+  { value: 'tomorrow', label: 'غدًا' },
+  { value: 'week', label: 'هذا الأسبوع' },
+]
+
+function readStatus(value: string | null): AdminStatusFilter {
+  return STATUS_OPTIONS.includes(value as AdminStatusFilter) ? (value as AdminStatusFilter) : 'all'
+}
+
+function readDate(value: string | null): AdminDateFilter {
+  return DATE_OPTIONS.some((o) => o.value === value) ? (value as AdminDateFilter) : 'all'
+}
+
+function countLabel(n: number): string {
+  if (n === 1) return 'طلب واحد'
+  if (n === 2) return 'طلبان'
+  if (n >= 3 && n <= 10) return `${n} طلبات`
+  return `${n} طلب`
+}
 
 export function AdminOrdersPage() {
+  const [params, setParams] = useSearchParams()
+  const status = readStatus(params.get('status'))
+  const date = readDate(params.get('date'))
+  const search = (params.get('q') ?? '').trim()
+
   const [orders, setOrders] = useState<AdminOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [status, setStatus] = useState<AdminStatusFilter>('all')
-  const [date, setDate] = useState<AdminDateFilter>('all')
-  const [search, setSearch] = useState('')
-  const [searchInput, setSearchInput] = useState('')
+  const [searchInput, setSearchInput] = useState(search)
   const [refreshing, setRefreshing] = useState(false)
+  usePageTitle('الطلبات | مستكة')
+
+  function setFilter(key: 'status' | 'date' | 'q', value: string) {
+    const next = new URLSearchParams(params)
+    if (!value || value === 'all') next.delete(key)
+    else next.set(key, value)
+    setParams(next, { replace: true })
+  }
 
   async function load(isRefresh = false) {
     if (isRefresh) setRefreshing(true)
@@ -39,156 +75,146 @@ export function AdminOrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, date, search])
 
-  return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="font-display text-4xl text-rose-deep">الطلبات</h2>
-          <p className="mt-2 text-muted">مراجعة وإدارة طلبات العملاء.</p>
-        </div>
-        <Button type="button" variant="ghost" disabled={loading || refreshing} onClick={() => void load(true)}>
-          {refreshing ? 'جاري التحديث...' : 'تحديث'}
-        </Button>
-      </header>
+  const filtered = status !== 'all' || date !== 'all' || Boolean(search)
 
-      <div className="mb-6 grid gap-3 rounded-3xl border border-line bg-paper p-4 shadow-soft md:grid-cols-3">
-        <SelectField
-          id="filter-status"
-          label="الحالة"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as AdminStatusFilter)}
-        >
-          <option value="all">الكل</option>
-          <option value="pending_review">قيد المراجعة</option>
-          <option value="confirmed">مؤكد</option>
-          <option value="rejected">مرفوض</option>
-          <option value="cancelled">ملغي</option>
-        </SelectField>
-        <SelectField
-          id="filter-date"
-          label="تاريخ الاستلام"
-          value={date}
-          onChange={(e) => setDate(e.target.value as AdminDateFilter)}
-        >
-          <option value="all">كل الطلبات</option>
-          <option value="today">اليوم</option>
-          <option value="tomorrow">غدًا</option>
-          <option value="week">هذا الأسبوع</option>
-        </SelectField>
-        <form
-          className="grid gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            setSearch(searchInput.trim())
-          }}
-        >
-          <TextField
-            id="filter-search"
-            label="بحث"
-            placeholder="رقم الطلب / الاسم / الموبايل"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </form>
+  function clearFilters() {
+    setSearchInput('')
+    setParams(new URLSearchParams(), { replace: true })
+  }
+
+  return (
+    <AdminPage>
+      <AdminPageHeader
+        title="الطلبات"
+        description="مراجعة طلبات العملاء وتأكيدها أو رفضها."
+        actions={
+          <AdminButton
+            icon={<IconRefresh size={18} />}
+            loading={refreshing}
+            disabled={loading}
+            onClick={() => void load(true)}
+          >
+            {refreshing ? 'جاري التحديث...' : 'تحديث'}
+          </AdminButton>
+        }
+      />
+
+      <div className={cx(adminSurfaceClass, 'mb-4 grid gap-3 p-3 sm:p-4')}>
+        <div role="group" aria-label="تصفية حسب الحالة" className="flex flex-wrap gap-1.5">
+          {STATUS_OPTIONS.map((option) => {
+            const active = status === option
+            return (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setFilter('status', option)}
+                className={cx(
+                  'inline-flex min-h-10 cursor-pointer items-center rounded-lg border px-2.5 text-sm font-semibold sm:px-3 transition-colors duration-150 motion-reduce:transition-none',
+                  active
+                    ? 'border-rose-deep bg-rose-deep text-ivory'
+                    : 'border-line bg-paper text-ink/80 hover:border-rose/40 hover:text-ink',
+                )}
+              >
+                {option === 'all' ? 'الكل' : STATUS_LABELS[option]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-[1fr_16rem]">
+          <form
+            role="search"
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setFilter('q', searchInput.trim())
+            }}
+          >
+            <label htmlFor="filter-search" className="sr-only">
+              بحث في الطلبات
+            </label>
+            <div className="relative min-w-0 flex-1">
+              <IconSearch size={18} className="pointer-events-none absolute inset-y-0 start-3 my-auto text-muted" />
+              <input
+                id="filter-search"
+                type="search"
+                enterKeyHint="search"
+                placeholder="رقم الطلب أو الاسم أو الهاتف"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className={cx(adminControlClass, 'min-h-11 ps-10')}
+              />
+            </div>
+            <AdminButton type="submit" variant="primary">
+              بحث
+            </AdminButton>
+          </form>
+          <div className="flex items-center gap-2">
+            <label htmlFor="filter-date" className="shrink-0 text-sm font-semibold text-muted">
+              الاستلام
+            </label>
+            <div className="min-w-0 flex-1">
+              <AdminSelect id="filter-date" value={date} onChange={(e) => setFilter('date', e.target.value)}>
+                {DATE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </AdminSelect>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {error ? (
-        <div className="mb-4">
-          <AdminAlert tone="error">{error}</AdminAlert>
+      {!loading && !error ? (
+        <div className="mb-3 flex min-h-10 flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted" aria-live="polite">
+            {orders.length ? countLabel(orders.length) : 'لا توجد نتائج'}
+            {search ? (
+              <>
+                {' '}
+                لعبارة «<span className="font-semibold text-ink">{search}</span>»
+              </>
+            ) : null}
+          </p>
+          {filtered ? (
+            <AdminButton size="sm" variant="ghost" icon={<IconClose size={16} />} onClick={clearFilters}>
+              مسح التصفية
+            </AdminButton>
+          ) : null}
         </div>
       ) : null}
-      {loading ? <p className="text-muted">جاري تحميل الطلبات...</p> : null}
+
+      {loading ? <AdminListSkeleton rows={6} label="جاري تحميل الطلبات" /> : null}
+
+      {!loading && error ? (
+        <AdminErrorState description={error} onRetry={() => void load(true)} retrying={refreshing} />
+      ) : null}
+
       {!loading && !error && orders.length === 0 ? (
-        <p className="rounded-3xl border border-dashed border-line bg-paper p-10 text-center text-muted">
-          لا توجد طلبات مطابقة للبحث.
-        </p>
+        filtered ? (
+          <AdminEmptyState
+            icon={<IconSearch />}
+            title="لا توجد طلبات مطابقة"
+            description="جرّبي تغيير الحالة أو موعد الاستلام أو عبارة البحث."
+            action={<AdminButton onClick={clearFilters}>مسح التصفية</AdminButton>}
+          />
+        ) : (
+          <AdminEmptyState
+            icon={<IconOrders />}
+            title="لا توجد طلبات"
+            description="ستظهر الطلبات هنا فور إرسالها من الموقع."
+          />
+        )
       ) : null}
 
       {!loading && !error && orders.length > 0 ? (
         <>
-          <div className="hidden overflow-x-auto rounded-3xl border border-line bg-paper shadow-soft lg:block">
-            <table className="min-w-full text-sm">
-              <thead className="border-b border-line bg-ivory/80 text-muted">
-                <tr>
-                  <th className="px-4 py-3 text-start font-semibold">رقم الطلب</th>
-                  <th className="px-4 py-3 text-start font-semibold">العميل</th>
-                  <th className="px-4 py-3 text-start font-semibold">تاريخ الاستلام</th>
-                  <th className="px-4 py-3 text-start font-semibold">وقت الاستلام</th>
-                  <th className="px-4 py-3 text-start font-semibold">المنطقة</th>
-                  <th className="px-4 py-3 text-start font-semibold">التورتة</th>
-                  <th className="px-4 py-3 text-start font-semibold">المقاس</th>
-                  <th className="px-4 py-3 text-start font-semibold">الأفراد</th>
-                  <th className="px-4 py-3 text-start font-semibold">الإجمالي</th>
-                  <th className="px-4 py-3 text-start font-semibold">الحالة</th>
-                  <th className="px-4 py-3 text-start font-semibold">تاريخ الإنشاء</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.id} className="border-b border-line/70 last:border-0 hover:bg-blush/20">
-                    <td className="px-4 py-3">
-                      <Link to={`/admin/orders/${order.id}`} className="font-semibold text-rose-deep hover:underline">
-                        {order.orderNumber}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold">{order.customerName}</p>
-                      <p className="text-xs text-muted" dir="ltr">
-                        {order.phone}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3">{formatArabicDate(order.date)}</td>
-                    <td className="px-4 py-3">{formatTimeLabel(order.time)}</td>
-                    <td className="px-4 py-3">{order.area ?? 'استلام'}</td>
-                    <td className="px-4 py-3">{order.cakeName ?? 'تصميم مخصص'}</td>
-                    <td className="px-4 py-3">{order.size}</td>
-                    <td className="px-4 py-3">{order.servings}</td>
-                    <td className="px-4 py-3">
-                      {order.totalPrice == null ? 'يُحدَّد لاحقًا' : formatEgp(order.totalPrice)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={order.status} />
-                    </td>
-                    <td className="px-4 py-3 text-muted">
-                      {new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }).format(
-                        new Date(order.createdAt),
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <ul className="grid gap-3 lg:hidden">
-            {orders.map((order) => (
-              <li key={order.id}>
-                <Link
-                  to={`/admin/orders/${order.id}`}
-                  className="block rounded-3xl border border-line bg-paper p-4 shadow-soft"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-rose-deep">{order.orderNumber}</p>
-                      <p className="mt-1 text-sm text-muted">{order.customerName}</p>
-                    </div>
-                    <StatusBadge status={order.status} />
-                  </div>
-                  <p className="mt-3 text-sm text-ink">
-                    {formatArabicDate(order.date)} · {formatTimeLabel(order.time)}
-                  </p>
-                  <p className="mt-1 text-sm text-muted">
-                    {order.cakeName ?? 'تصميم مخصص'} · {order.size} · {order.servings} فرد
-                  </p>
-                  <p className="mt-2 font-semibold">
-                    {order.totalPrice == null ? 'يُحدَّد لاحقًا' : formatEgp(order.totalPrice)}
-                  </p>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <OrdersTable orders={orders} className="hidden md:block" />
+          <OrdersCardList orders={orders} className="md:hidden" />
         </>
       ) : null}
-    </div>
+    </AdminPage>
   )
 }
