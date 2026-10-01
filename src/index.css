@@ -70,6 +70,30 @@ img {
   animation: rise 0.35s ease-out both;
 }
 
+@keyframes text-type-blink {
+  0%,
+  45% {
+    opacity: 0.55;
+  }
+  55%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.text-type-cursor {
+  display: inline-block;
+  width: 1.5px;
+  height: 0.8em;
+  margin-inline-start: 0.08em;
+  margin-inline-end: calc(-1.5px - 0.08em);
+  vertical-align: -0.05em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.55;
+  animation: text-type-blink 1.1s ease-in-out infinite;
+}
+
 a,
 button {
   cursor: pointer;
@@ -105,6 +129,10 @@ button {
 
   .rise {
     animation: none;
+  }
+
+  .text-type-cursor {
+    display: none;
   }
 
   a,

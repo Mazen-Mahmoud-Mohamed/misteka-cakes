@@ -1,6 +1,7 @@
 import butterflies from '@/assets/cakes/butterflies.jpeg'
 import { Container } from '@/components/layout/Container'
 import { ButtonLink } from '@/components/ui/Button'
+import { TextType } from '@/components/ui/TextType'
 import { brand } from '@/data/brand'
 import { content } from '@/data/content'
 
@@ -16,7 +17,7 @@ export function HeroSection() {
           />
           <p className="mt-5 font-latin text-lg tracking-[0.18em] text-[#8a6532]">{brand.nameEn}</p>
           <h1 className="mt-2 font-display text-4xl leading-tight text-rose-deep sm:text-5xl lg:text-[3.4rem]">
-            {brand.tagline}
+            <TextType text={brand.tagline} />
           </h1>
           <p className="mx-auto mt-4 max-w-md text-lg leading-8 text-muted lg:mx-0">{content.hero.intro}</p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center lg:justify-start">
