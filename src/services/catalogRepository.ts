@@ -123,9 +123,13 @@ function mapZones(rows: ZoneRow[]): DeliveryZone[] {
     }))
 }
 
-async function fetchRemoteCatalog(): Promise<CatalogBundle | null> {
+type RemoteCatalogResult =
+  | { ok: true; bundle: CatalogBundle }
+  | { ok: false; error: string }
+
+async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
   const supabase = getSupabase()
-  if (!supabase) return null
+  if (!supabase) return { ok: false, error: 'إعدادات الاتصال غير مكتملة.' }
 
   const [sizesRes, cakesRes, fillingsRes, extrasRes, zonesRes] = await Promise.all([
     supabase.from('cake_sizes').select('*').eq('enabled', true).order('sort_order'),
@@ -135,49 +139,58 @@ async function fetchRemoteCatalog(): Promise<CatalogBundle | null> {
     supabase.from('delivery_zones').select('*').eq('enabled', true).order('sort_order'),
   ])
 
-  if (sizesRes.error || cakesRes.error || fillingsRes.error || extrasRes.error || zonesRes.error) {
-    console.warn('Supabase catalog load failed; using local catalog.', {
-      sizes: sizesRes.error?.message,
+  // Sizes are the source of truth for /pricing — fail closed if they do not load.
+  if (sizesRes.error) {
+    console.warn('Supabase cake_sizes load failed.', sizesRes.error.message)
+    return { ok: false, error: 'تعذّر تحميل المقاسات والأسعار.' }
+  }
+
+  const sizes = mapSizes((sizesRes.data ?? []) as CakeSizeRow[])
+  if (!sizes.length) {
+    return { ok: false, error: 'لا توجد مقاسات مفعّلة للعرض.' }
+  }
+
+  if (cakesRes.error || fillingsRes.error || extrasRes.error || zonesRes.error) {
+    console.warn('Supabase catalog partial load; keeping remote sizes.', {
       cakes: cakesRes.error?.message,
       fillings: fillingsRes.error?.message,
       extras: extrasRes.error?.message,
       zones: zonesRes.error?.message,
     })
-    return null
-  }
-
-  const sizes = mapSizes((sizesRes.data ?? []) as CakeSizeRow[])
-  const cakes = mapCakes((cakesRes.data ?? []) as CakeRow[])
-  const fillings = mapFillings((fillingsRes.data ?? []) as FillingRow[])
-  const extras = mapExtras((extrasRes.data ?? []) as ExtraRow[])
-  const zones = mapZones((zonesRes.data ?? []) as ZoneRow[])
-
-  // Incomplete remote catalog → keep local MVP data rather than a broken UI.
-  if (!sizes.length || !cakes.length || !fillings.length || !zones.length) {
-    return null
   }
 
   const local = createLocalCatalog()
+  const cakes = !cakesRes.error && (cakesRes.data?.length ?? 0) > 0 ? mapCakes((cakesRes.data ?? []) as CakeRow[]) : local.cakes
+  const fillings =
+    !fillingsRes.error && (fillingsRes.data?.length ?? 0) > 0 ? mapFillings((fillingsRes.data ?? []) as FillingRow[]) : local.fillings
+  const extras =
+    !extrasRes.error && (extrasRes.data?.length ?? 0) > 0 ? mapExtras((extrasRes.data ?? []) as ExtraRow[]) : local.extras
+  const zones = !zonesRes.error && (zonesRes.data?.length ?? 0) > 0 ? mapZones((zonesRes.data ?? []) as ZoneRow[]) : local.zones
+
   return {
-    cakes,
-    sizes,
-    fillings,
-    extras: extras.length ? extras : local.extras,
-    zones,
-    pricingNotes: local.pricingNotes,
-    deliveryFee: local.deliveryFee,
-    deliveryNote: local.deliveryNote,
+    ok: true,
+    bundle: {
+      cakes,
+      sizes,
+      fillings,
+      extras,
+      zones,
+      pricingNotes: local.pricingNotes,
+      deliveryFee: local.deliveryFee,
+      deliveryNote: local.deliveryNote,
+    },
   }
 }
 
 export interface CatalogLoadResult {
   source: DataSource
   configured: boolean
+  error?: string
 }
 
 /**
  * Hydrate the in-memory catalog.
- * Local data is the default. Supabase replaces it only when a complete catalog loads.
+ * When Supabase is configured, enabled cake_sizes from Supabase are required for pricing.
  */
 export async function loadCatalog(): Promise<CatalogLoadResult> {
   const configured = isSupabaseConfigured()
@@ -187,13 +200,16 @@ export async function loadCatalog(): Promise<CatalogLoadResult> {
   }
 
   const remote = await fetchRemoteCatalog()
-  if (!remote) {
-    setCatalog(createLocalCatalog(), 'local')
-    return { source: 'local', configured: true }
+  if (!remote.ok) {
+    // Keep any previously loaded remote catalog when a refresh fails.
+    if (getCatalogSource() !== 'supabase') {
+      setCatalog(createLocalCatalog(), 'local')
+    }
+    return { source: getCatalogSource(), configured: true, error: remote.error }
   }
 
-  setCatalog(remote, 'supabase')
-  return { source: getCatalogSource(), configured: true }
+  setCatalog(remote.bundle, 'supabase')
+  return { source: 'supabase', configured: true }
 }
 
 export function peekCatalog() {

@@ -1,4 +1,3 @@
-import { getLocalBasicPricing } from '@/data/localCatalog'
 import { timeSlots } from '@/data/options'
 import { getCatalog } from '@/services/catalogStore'
 import type { Cake, CakeSize, PricingGroup } from '@/types'
@@ -6,6 +5,7 @@ import type { Cake, CakeSize, PricingGroup } from '@/types'
 /**
  * Synchronous catalog accessors.
  * Backed by the in-memory store (local by default, Supabase after hydration).
+ * Never silently swap back to hardcoded pricing once sizes are in the store.
  */
 
 export function listCakes(): Cake[] {
@@ -27,14 +27,13 @@ export function getSize(id: string): CakeSize | undefined {
   return getCatalog().sizes.find((size) => size.id === id)
 }
 
-export function getBasicPricing() {
+/** Splits enabled sizes already loaded into the catalog store (sort_order preserved). */
+export function getBasicPricing(): { single: CakeSize[]; twoTier: CakeSize[] } {
   const sizes = getCatalog().sizes
-  const single = sizes.filter((size) => size.group === 'single')
-  const twoTier = sizes.filter((size) => size.group === 'two-tier')
-  if (single.length && twoTier.length) {
-    return { single, twoTier }
+  return {
+    single: sizes.filter((size) => size.group === 'single'),
+    twoTier: sizes.filter((size) => size.group === 'two-tier'),
   }
-  return getLocalBasicPricing()
 }
 
 export function getPricingNotes() {
