@@ -56,6 +56,35 @@ async function main() {
   const list = await supabase.storage.from('order-references').list()
   record('anon_storage_list_empty_or_denied', Boolean(list.error) || (list.data?.length ?? 0) === 0, list.error?.message || `count=${list.data?.length}`)
 
+  // Order tracking (supabase/order-tracking.sql). Before the migration is applied
+  // the RPCs are missing, which is reported but still safe.
+  for (const table of ['order_status_events', 'order_lookup_attempts']) {
+    const res = await supabase.from(table).select('*').limit(1)
+    record(`anon_select_${table}_denied`, Boolean(res.error) || (res.data?.length ?? 0) === 0, res.error?.message || `rows=${res.data?.length}`)
+  }
+
+  const missing = (err) => /Could not find the function|does not exist/i.test(err?.message || '')
+  const track = await supabase.rpc('track_customer_orders', { p_phone: '01599999999' })
+  record(
+    'anon_track_unknown_phone_returns_nothing',
+    missing(track.error) || (track.data?.ok === true && track.data.orders.length === 0) || track.data?.code === 'rate_limited',
+    missing(track.error) ? 'migration not applied yet' : JSON.stringify(track.data),
+  )
+
+  const details = await supabase.rpc('get_customer_order', { p_phone: '01599999999', p_order_number: 'MK-00000000' })
+  record(
+    'anon_details_require_matching_phone',
+    missing(details.error) || details.data?.ok === false,
+    missing(details.error) ? 'migration not applied yet' : JSON.stringify(details.data),
+  )
+
+  const cancel = await supabase.rpc('customer_cancel_order', { p_phone: '01599999999', p_order_number: 'MK-00000000' })
+  record(
+    'anon_cancel_requires_matching_phone',
+    missing(cancel.error) || cancel.data?.ok === false,
+    missing(cancel.error) ? 'migration not applied yet' : JSON.stringify(cancel.data),
+  )
+
   const failed = results.filter((r) => !r.pass)
   console.log(`\nSUMMARY ${results.filter((r) => r.pass).length}/${results.length}`)
   if (failed.length) process.exit(1)

@@ -156,7 +156,25 @@ async function mockSupabase(context, opts = {}) {
       const body = req.postDataJSON()
       log.rpc.push(body)
       const row = db.orders.find((o) => o.id === body.order_id)
-      if (row) row.status = body.new_status
+      if (!row) return json({ ok: false, code: 'not_found', message: 'الطلب غير موجود.' })
+      // Mirrors admin_update_order_status() in supabase/order-tracking.sql.
+      const allowed = {
+        pending_review: ['confirmed', 'rejected', 'cancelled'],
+        confirmed: ['preparing', 'cancelled'],
+        preparing: ['in_production', 'cancelled'],
+        in_production: ['ready'],
+        ready: row.service_type === 'delivery' ? ['out_for_delivery'] : ['delivered'],
+        out_for_delivery: ['delivered'],
+      }[row.status] ?? []
+      if (!allowed.includes(body.new_status)) {
+        log.invalid = (log.invalid || 0) + 1
+        return json({ ok: false, code: 'invalid_transition', message: 'لا يمكن تغيير حالة هذا الطلب بهذه الطريقة.' })
+      }
+      if (body.new_status === 'rejected' && String(body.reason ?? '').trim().length < 3) {
+        return json({ ok: false, code: 'reason_required', message: 'اكتبي سبب رفض الطلب.' })
+      }
+      row.status = body.new_status
+      if (body.new_status === 'rejected') row.rejection_reason = body.reason.trim()
       return json({ ok: true, order: { status: body.new_status } })
     }
 
@@ -387,8 +405,72 @@ async function main() {
   if (last?.order_id === '00000000-0000-0000-0000-000000000001' && last?.new_status === 'confirmed' && log.writesToOrders === 0)
     ok('status update goes through admin_update_order_status RPC only (no direct orders writes)')
   else note(`status RPC payload unexpected: ${JSON.stringify(last)} writes=${log.writesToOrders}`)
-  if (dialogText.includes('مؤكد')) ok('confirmation copy explains the consequence')
+  if (dialogText.includes('تم التأكيد')) ok('confirmation copy explains the consequence')
+  else note(`confirmation copy: ${dialogText}`)
   await page.screenshot({ path: join(OUT, 'order-detail-after-confirm-1440.png'), fullPage: true })
+
+  // Full lifecycle on a delivery order: each step offers only the next allowed status.
+  const lifecycle = [
+    ['preparing', 'جاري التجهيز'],
+    ['in_production', 'جاري التصنيع'],
+    ['ready', 'جاهز'],
+    ['out_for_delivery', 'خرج للتوصيل'],
+    ['delivered', 'تم التسليم'],
+  ]
+  let lifecycleOk = true
+  for (const [status, label] of lifecycle) {
+    const button = page.getByRole('button', { name: `تغيير إلى «${label}»`, exact: true })
+    if (!(await button.count())) {
+      lifecycleOk = false
+      note(`lifecycle: no button for ${status}`)
+      break
+    }
+    const forwardButtons = await page.getByRole('group', { name: 'الحالات التالية المتاحة' }).getByRole('button', { name: /^تغيير إلى/ }).count()
+    if (forwardButtons !== 1) {
+      lifecycleOk = false
+      note(`lifecycle: ${forwardButtons} forward buttons before ${status}`)
+    }
+    await button.click()
+    await dialog.getByRole('button', { name: `تغيير إلى «${label}»` }).click()
+    await page.getByText('تم تحديث حالة الطلب بنجاح').first().waitFor({ timeout: 5000 })
+    await settle(page)
+    if (log.rpc.at(-1)?.new_status !== status) {
+      lifecycleOk = false
+      note(`lifecycle RPC payload: ${JSON.stringify(log.rpc.at(-1))}`)
+    }
+  }
+  const terminalActions = await page.getByRole('group', { name: 'الحالات التالية المتاحة' }).count()
+  if (lifecycleOk && terminalActions === 0 && !log.invalid)
+    ok('admin lifecycle confirmed → preparing → in_production → ready → out_for_delivery → delivered; delivered has no actions')
+  else note(`lifecycle failed (terminalActions=${terminalActions}, invalid=${log.invalid || 0})`)
+  await page.screenshot({ path: join(OUT, 'order-detail-delivered-1440.png'), fullPage: true })
+
+  await page.goto(`${BASE}/#/admin/orders/00000000-0000-0000-0000-000000000003`, { waitUntil: 'networkidle' })
+  await settle(page)
+  const confirmedCancel = await page.getByRole('button', { name: 'إلغاء الطلب', exact: true }).count()
+  if (confirmedCancel === 1) ok('confirmed order offers admin cancellation')
+  else note(`confirmed cancel buttons=${confirmedCancel}`)
+
+  // Rejection requires a reason, which is sent to the RPC.
+  await page.goto(`${BASE}/#/admin/orders/00000000-0000-0000-0000-000000000002`, { waitUntil: 'networkidle' })
+  await settle(page)
+  const rpcBefore = log.rpc.length
+  await page.getByRole('button', { name: 'رفض الطلب', exact: true }).click()
+  await dialog.waitFor()
+  await dialog.getByRole('button', { name: 'رفض الطلب' }).click()
+  const reasonErr = await dialog.innerText()
+  if (reasonErr.includes('اكتبي سبب الرفض') && log.rpc.length === rpcBefore) ok('rejecting without a reason is blocked client-side')
+  else note('empty rejection reason was not blocked')
+  await page.screenshot({ path: join(OUT, 'reject-reason-1440.png') })
+  await dialog.getByLabel('سبب الرفض').fill('الموعد المطلوب غير متاح لهذا الحجم')
+  await dialog.getByRole('button', { name: 'رفض الطلب' }).click()
+  await page.getByText('تم تحديث حالة الطلب بنجاح').first().waitFor({ timeout: 5000 })
+  await settle(page)
+  const rej = log.rpc.at(-1)
+  const rejText = await page.locator('main').innerText()
+  if (rej?.new_status === 'rejected' && rej?.reason === 'الموعد المطلوب غير متاح لهذا الحجم' && rejText.includes('سبب الرفض'))
+    ok('rejection reason is sent to admin_update_order_status and shown on the order')
+  else note(`rejection payload: ${JSON.stringify(rej)}`)
 
   // Catalog CRUD: validation, edit save payload, disable confirmation.
   await page.goto(`${BASE}/#/admin/sizes`, { waitUntil: 'networkidle' })

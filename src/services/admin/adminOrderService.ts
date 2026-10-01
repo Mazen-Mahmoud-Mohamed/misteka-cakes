@@ -112,6 +112,8 @@ export async function getAdminOrderStats(): Promise<{ stats: AdminOrderStats | n
     total: rows.length,
     pendingReview: rows.filter((r) => r.status === 'pending_review').length,
     confirmed: rows.filter((r) => r.status === 'confirmed').length,
+    inProgress: rows.filter((r) => ['preparing', 'in_production', 'ready', 'out_for_delivery'].includes(r.status)).length,
+    delivered: rows.filter((r) => r.status === 'delivered').length,
     rejected: rows.filter((r) => r.status === 'rejected').length,
     cancelled: rows.filter((r) => r.status === 'cancelled').length,
     today: rows.filter((r) => String(r.event_date).slice(0, 10) === today).length,
@@ -119,13 +121,18 @@ export async function getAdminOrderStats(): Promise<{ stats: AdminOrderStats | n
   return { stats, error: null }
 }
 
-export async function updateOrderStatus(orderId: string, newStatus: OrderStatus): Promise<StatusUpdateResult> {
+export async function updateOrderStatus(
+  orderId: string,
+  newStatus: OrderStatus,
+  reason?: string,
+): Promise<StatusUpdateResult> {
   const supabase = getSupabase()
   if (!supabase) return { ok: false, message: 'إعدادات الاتصال غير مكتملة.' }
 
   const { data, error } = await supabase.rpc('admin_update_order_status', {
     order_id: orderId,
     new_status: newStatus,
+    reason: newStatus === 'rejected' ? (reason ?? '').trim() : null,
   })
 
   if (error) return { ok: false, message: 'تعذّر تحديث حالة الطلب.' }

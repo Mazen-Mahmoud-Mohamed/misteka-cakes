@@ -6,6 +6,7 @@ import { AdminButton, AdminButtonLink } from '@/components/admin/AdminButton'
 import { AdminCard, AdminDetail, AdminDetailList, AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
 import { AdminEmptyState, AdminErrorState, Skeleton } from '@/components/admin/AdminStates'
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
+import { AdminTextAreaField } from '@/components/admin/AdminField'
 import {
   IconArrowBack,
   IconCake,
@@ -30,6 +31,7 @@ import type { AdminOrder } from '@/types/admin'
 import type { OrderStatus } from '@/types'
 import { formatTimeLabel } from '@/utils/dates'
 import { chargeAmountLabel } from '@/utils/format'
+import { nextAdminStatuses, STATUS_LABELS } from '@/utils/orderStatus'
 
 const DESIGN_MODE_LABELS: Record<AdminOrder['designMode'], string> = {
   catalog: 'من الكتالوج',
@@ -70,6 +72,8 @@ export function AdminOrderDetailPage() {
   const [imageError, setImageError] = useState('')
   const [imageLoading, setImageLoading] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null)
+  const [reason, setReason] = useState('')
+  const [reasonError, setReasonError] = useState('')
   const { flash, setFlash, clearFlash } = useFlash()
   usePageTitle(order ? `الطلب ${order.orderNumber} | مستكة` : 'تفاصيل الطلب | مستكة')
 
@@ -106,43 +110,76 @@ export function AdminOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  function openStatusDialog(next: OrderStatus) {
+    setReason('')
+    setReasonError('')
+    setPendingStatus(next)
+  }
+
   async function applyStatus(next: OrderStatus) {
     if (!order) return
+    if (next === 'rejected' && reason.trim().length < 3) {
+      setReasonError('اكتبي سبب الرفض (3 أحرف على الأقل). سيظهر السبب للعميل.')
+      return
+    }
     setBusy(true)
     setActionError('')
-    const result = await updateOrderStatus(order.id, next)
+    const result = await updateOrderStatus(order.id, next, reason)
     setBusy(false)
-    setPendingStatus(null)
     if (!result.ok) {
+      if (result.code === 'reason_required' || result.code === 'reason_too_long') {
+        setReasonError(result.message)
+        return
+      }
+      setPendingStatus(null)
       setActionError(result.message)
       setFlash({ tone: 'error', text: result.message })
       return
     }
+    setPendingStatus(null)
     setFlash({ tone: 'success', text: 'تم تحديث حالة الطلب بنجاح.' })
     await load()
   }
 
   const finalNote = 'هذه حالة نهائية ولا يمكن التراجع عنها من لوحة التحكم.'
-  const confirmCopy =
-    pendingStatus === 'confirmed'
+  const nextStatuses = order ? nextAdminStatuses(order.status, order.serviceType) : []
+  const forwardStatuses = nextStatuses.filter((s) => s !== 'rejected' && s !== 'cancelled')
+  const confirmCopy = !pendingStatus
+    ? null
+    : pendingStatus === 'rejected'
       ? {
-          title: 'تأكيد الطلب؟',
-          body: 'سيتم تغيير حالة الطلب إلى «مؤكد»، ولن يعود إلى قيد المراجعة بعد ذلك.',
-          label: 'تأكيد الطلب',
+          title: 'رفض الطلب؟',
+          body: `سيتم تغيير حالة الطلب إلى «مرفوض» وسيظهر سبب الرفض للعميل في صفحة متابعة الطلب. ${finalNote}`,
+          label: 'رفض الطلب',
+          danger: true,
         }
-      : pendingStatus === 'rejected'
-        ? { title: 'رفض الطلب؟', body: `سيتم تغيير حالة الطلب إلى «مرفوض». ${finalNote}`, label: 'رفض الطلب', danger: true }
-        : pendingStatus === 'cancelled'
-          ? {
-              title: 'إلغاء الطلب؟',
-              body:
-                order?.status === 'confirmed'
-                  ? `هذا الطلب مؤكد حاليًا. سيتم تغيير حالته إلى «ملغى». ${finalNote}`
-                  : `سيتم تغيير حالة الطلب إلى «ملغى». ${finalNote}`,
-              label: 'إلغاء الطلب',
-              danger: true,
-            }
-          : null
+      : pendingStatus === 'cancelled'
+        ? {
+            title: 'إلغاء الطلب؟',
+            body: `الحالة الحالية «${order ? STATUS_LABELS[order.status] : ''}». سيتم تغيير حالة الطلب إلى «ملغى». ${finalNote}`,
+            label: 'إلغاء الطلب',
+            danger: true,
+          }
+        : {
+            title: `تغيير الحالة إلى «${STATUS_LABELS[pendingStatus]}»؟`,
+            body:
+              pendingStatus === 'delivered'
+                ? `سيتم تسجيل الطلب كـ«تم التسليم». ${finalNote}`
+                : `سيتم نقل الطلب من «${order ? STATUS_LABELS[order.status] : ''}» إلى «${STATUS_LABELS[pendingStatus]}»، ولا يمكن الرجوع للحالة السابقة.`,
+            label: pendingStatus === 'confirmed' ? 'تأكيد الطلب' : `تغيير إلى «${STATUS_LABELS[pendingStatus]}»`,
+          }
+
+  const statusHint: Record<OrderStatus, string> = {
+    pending_review: 'الطلب بانتظار مراجعتك. راجعي التفاصيل ثم أكّدي الطلب أو ارفضيه.',
+    confirmed: 'الطلب مؤكد. ابدئي التجهيز عند الاستعداد، أو ألغيه عند الحاجة.',
+    preparing: 'جاري تجهيز الطلب. يمكن إلغاؤه قبل بدء التصنيع فقط.',
+    in_production: 'التورتة قيد التصنيع. الخطوة التالية: جاهز.',
+    ready: order?.serviceType === 'delivery' ? 'الطلب جاهز. الخطوة التالية: خرج للتوصيل.' : 'الطلب جاهز للاستلام. سجّلي التسليم عند استلام العميل.',
+    out_for_delivery: 'الطلب في الطريق للعميل. سجّلي التسليم عند الوصول.',
+    delivered: 'تم تسليم الطلب. هذه حالة نهائية.',
+    rejected: 'تم رفض الطلب. هذه حالة نهائية.',
+    cancelled: order?.cancelledBy === 'customer' ? 'ألغى العميل هذا الطلب أثناء المراجعة. هذه حالة نهائية.' : 'تم إلغاء الطلب. هذه حالة نهائية.',
+  }
 
   const notFound = !loading && error === 'الطلب غير موجود.'
 
@@ -195,13 +232,14 @@ export function AdminOrderDetailPage() {
                   <span className="text-sm text-muted">الحالة الحالية</span>
                   <StatusBadge status={order.status} />
                 </div>
-                <p className="mt-3 text-[0.8125rem] leading-6 text-muted">
-                  {order.status === 'pending_review'
-                    ? 'الطلب بانتظار مراجعتك. راجعي التفاصيل ثم أكّدي الطلب أو ارفضيه.'
-                    : order.status === 'confirmed'
-                      ? 'الطلب مؤكد. يمكن إلغاؤه فقط عند الحاجة.'
-                      : 'هذه حالة نهائية ولا توجد إجراءات إضافية.'}
-                </p>
+                <p className="mt-3 text-[0.8125rem] leading-6 text-muted">{statusHint[order.status]}</p>
+
+                {order.status === 'rejected' && order.rejectionReason ? (
+                  <div className="mt-3 rounded-lg border border-rose/30 bg-blush/40 px-3 py-2.5 text-sm leading-6 text-ink">
+                    <span className="font-semibold text-rose-deep">سبب الرفض: </span>
+                    {order.rejectionReason}
+                  </div>
+                ) : null}
 
                 {actionError ? (
                   <AdminAlert tone="error" className="mt-3">
@@ -209,25 +247,28 @@ export function AdminOrderDetailPage() {
                   </AdminAlert>
                 ) : null}
 
-                {order.status === 'pending_review' || order.status === 'confirmed' ? (
-                  <div className="mt-4 grid gap-2">
-                    {order.status === 'pending_review' ? (
-                      <>
-                        <AdminButton variant="primary" disabled={busy} onClick={() => setPendingStatus('confirmed')}>
-                          تأكيد الطلب
-                        </AdminButton>
-                        <AdminButton variant="dangerOutline" disabled={busy} onClick={() => setPendingStatus('rejected')}>
-                          رفض الطلب
-                        </AdminButton>
-                        <AdminButton variant="ghost" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
-                          إلغاء الطلب
-                        </AdminButton>
-                      </>
-                    ) : (
-                      <AdminButton variant="dangerOutline" disabled={busy} onClick={() => setPendingStatus('cancelled')}>
-                        إلغاء الطلب المؤكد
+                {nextStatuses.length ? (
+                  <div className="mt-4 grid gap-2" role="group" aria-label="الحالات التالية المتاحة">
+                    <p className="text-xs font-semibold text-muted">الحالة التالية</p>
+                    {forwardStatuses.map((next) => (
+                      <AdminButton key={next} variant="primary" disabled={busy} onClick={() => openStatusDialog(next)}>
+                        {next === 'confirmed' ? 'تأكيد الطلب' : `تغيير إلى «${STATUS_LABELS[next]}»`}
                       </AdminButton>
-                    )}
+                    ))}
+                    {nextStatuses.includes('rejected') ? (
+                      <AdminButton variant="dangerOutline" disabled={busy} onClick={() => openStatusDialog('rejected')}>
+                        رفض الطلب
+                      </AdminButton>
+                    ) : null}
+                    {nextStatuses.includes('cancelled') ? (
+                      <AdminButton
+                        variant={order.status === 'pending_review' ? 'ghost' : 'dangerOutline'}
+                        disabled={busy}
+                        onClick={() => openStatusDialog('cancelled')}
+                      >
+                        إلغاء الطلب
+                      </AdminButton>
+                    ) : null}
                   </div>
                 ) : null}
               </AdminCard>
@@ -400,7 +441,24 @@ export function AdminOrderDetailPage() {
           busy={busy}
           onCancel={() => setPendingStatus(null)}
           onConfirm={() => void applyStatus(pendingStatus)}
-        />
+        >
+          {pendingStatus === 'rejected' ? (
+            <AdminTextAreaField
+              id="rejection-reason"
+              label="سبب الرفض"
+              hint="سيظهر هذا السبب للعميل كما هو."
+              required
+              rows={3}
+              maxLength={500}
+              value={reason}
+              error={reasonError || undefined}
+              onChange={(e) => {
+                setReason(e.target.value)
+                if (reasonError) setReasonError('')
+              }}
+            />
+          ) : null}
+        </ConfirmDialog>
       ) : null}
 
       <AdminToast flash={flash} onClose={clearFlash} />

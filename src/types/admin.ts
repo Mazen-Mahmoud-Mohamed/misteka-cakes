@@ -32,6 +32,8 @@ export interface AdminOrderRow {
   pending_charges: unknown
   price_lines: unknown
   status: OrderStatus
+  rejection_reason?: string | null
+  cancelled_by?: 'customer' | 'admin' | null
   created_at: string
 }
 
@@ -66,6 +68,8 @@ export interface AdminOrder {
   pendingCharges: string[]
   priceLines: PriceLine[]
   status: OrderStatus
+  rejectionReason: string | null
+  cancelledBy: 'customer' | 'admin' | null
   createdAt: string
 }
 
@@ -84,6 +88,8 @@ export interface AdminOrderStats {
   total: number
   pendingReview: number
   confirmed: number
+  inProgress: number
+  delivered: number
   rejected: number
   cancelled: number
   today: number
@@ -160,13 +166,10 @@ export function mapAdminOrder(row: AdminOrderRow): AdminOrder {
     pendingCharges: asPending(row.pending_charges),
     priceLines: asPriceLines(row.price_lines),
     status: row.status,
+    rejectionReason: row.rejection_reason ?? null,
+    cancelledBy: row.cancelled_by ?? null,
     createdAt: row.created_at,
   }
 }
 
-export const STATUS_LABELS: Record<OrderStatus, string> = {
-  pending_review: 'قيد المراجعة',
-  confirmed: 'مؤكد',
-  rejected: 'مرفوض',
-  cancelled: 'ملغى',
-}
+export { STATUS_LABELS } from '@/utils/orderStatus'

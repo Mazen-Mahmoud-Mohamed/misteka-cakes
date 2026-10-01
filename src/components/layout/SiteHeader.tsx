@@ -39,6 +39,9 @@ export function SiteHeader() {
           <Link to="/pricing" className={linkClass}>
             الأسعار
           </Link>
+          <Link to="/track-order" className={linkClass}>
+            متابعة الطلب
+          </Link>
           <ButtonLink to="/order" className="ms-2">
             {content.hero.primaryCta}
           </ButtonLink>
@@ -70,6 +73,9 @@ export function SiteHeader() {
           </Link>
           <Link to="/pricing" className={linkClass} onClick={close}>
             الأسعار
+          </Link>
+          <Link to="/track-order" className={linkClass} onClick={close}>
+            متابعة الطلب
           </Link>
           <ButtonLink to="/order" className="mt-2" >
             {content.hero.primaryCta}

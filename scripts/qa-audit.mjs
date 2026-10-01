@@ -174,7 +174,7 @@ async function main() {
   const today = new Date()
   const tooSoon = iso(addDays(today, 1))
   // Far enough out to avoid collisions with prior live integration bookings.
-  const valid = iso(addDays(today, 28))
+  const valid = iso(addDays(today, Number(process.env.QA_DAYS_AHEAD) || 28))
   await page.locator('#date').fill(tooSoon)
   await page.waitForTimeout(200)
   const soonMsg = await page.locator('#date-error, [role="alert"]').allTextContents()

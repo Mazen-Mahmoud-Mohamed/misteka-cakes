@@ -11,8 +11,9 @@ import { listAdminOrders } from '@/services/admin/adminOrderService'
 import type { AdminDateFilter, AdminOrder, AdminStatusFilter } from '@/types/admin'
 import { STATUS_LABELS } from '@/types/admin'
 import { cx } from '@/utils/cx'
+import { ORDER_STATUSES } from '@/utils/orderStatus'
 
-const STATUS_OPTIONS: AdminStatusFilter[] = ['all', 'pending_review', 'confirmed', 'rejected', 'cancelled']
+const STATUS_OPTIONS: AdminStatusFilter[] = ['all', ...ORDER_STATUSES]
 const DATE_OPTIONS: Array<{ value: AdminDateFilter; label: string }> = [
   { value: 'all', label: 'كل المواعيد' },
   { value: 'today', label: 'اليوم' },

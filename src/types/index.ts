@@ -8,7 +8,16 @@ export type ServiceType = 'delivery' | 'pickup'
 
 export type DesignMode = 'catalog' | 'similar' | 'custom'
 
-export type OrderStatus = 'pending_review' | 'confirmed' | 'cancelled' | 'rejected'
+export type OrderStatus =
+  | 'pending_review'
+  | 'confirmed'
+  | 'preparing'
+  | 'in_production'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'rejected'
+  | 'cancelled'
 
 export type DataSource = 'local' | 'supabase'
 

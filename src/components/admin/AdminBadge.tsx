@@ -30,7 +30,12 @@ export function AdminBadge({ tone, children, className }: { tone: BadgeTone; chi
 
 export const ORDER_STATUS_TONE: Record<OrderStatus, BadgeTone> = {
   pending_review: 'pending',
-  confirmed: 'success',
+  confirmed: 'info',
+  preparing: 'info',
+  in_production: 'info',
+  ready: 'info',
+  out_for_delivery: 'info',
+  delivered: 'success',
   rejected: 'danger',
   cancelled: 'neutral',
 }

@@ -20,6 +20,7 @@ import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { OrderPage } from '@/pages/OrderPage'
 import { PricingPage } from '@/pages/PricingPage'
+import { TrackOrderPage } from '@/pages/TrackOrderPage'
 
 function ScrollManager() {
   const location = useLocation()
@@ -46,6 +47,7 @@ function CustomerLayout() {
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/order" element={<OrderPage />} />
+          <Route path="/track-order" element={<TrackOrderPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
