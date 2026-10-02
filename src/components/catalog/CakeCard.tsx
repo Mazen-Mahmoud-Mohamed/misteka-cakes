@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { categoryLabels } from '@/data/cakes'
 import { ButtonLink } from '@/components/ui/Button'
+import { getCategoryLabel } from '@/services/catalogService'
 import type { Cake } from '@/types'
 import { cx } from '@/utils/cx'
 
@@ -16,7 +16,7 @@ export function CakeCard({ cake, className }: { cake: Cake; className?: string }
         />
       </div>
       <div className="flex flex-1 flex-col p-5 sm:p-6">
-        <p className="text-xs font-semibold text-rose">{categoryLabels[cake.category]}</p>
+        <p className="text-xs font-semibold text-rose">{getCategoryLabel(cake.category)}</p>
         <h3 className="mt-1.5 font-display text-2xl leading-snug text-rose-deep sm:text-[1.75rem]">{cake.name}</h3>
         <p className="mt-2 text-sm leading-7 text-muted">{cake.description}</p>
         <div className="mt-auto flex flex-col gap-1 pt-5">

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { ChoiceCard } from '@/components/ui/ChoiceCard'
 import { TextAreaField } from '@/components/ui/Field'
+import { useCatalog } from '@/providers/CatalogProvider'
 import { listCakes, listExtras, listSizes } from '@/services/catalogService'
 import { recommendSizeId, sizeFitNote } from '@/services/pricingService'
 import type { OrderDraft, PricingGroup } from '@/types'
@@ -24,6 +25,7 @@ export function CakeDetailsStep({
   onReference: (file: File | null) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
+  useCatalog()
   const cakes = listCakes()
   const sizes = listSizes(draft.structure)
   const people = Number(draft.servings)

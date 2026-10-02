@@ -1,4 +1,9 @@
-export type CakeCategory = 'birthday' | 'celebration'
+export type CakeCategory = string
+
+export interface CakeCategoryInfo {
+  id: CakeCategory
+  name: string
+}
 
 export type PricingGroup = 'single' | 'two-tier'
 

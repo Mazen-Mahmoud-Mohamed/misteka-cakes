@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { cakeImageMap } from '@/data/localCatalog'
+import { useRef, useState, type ReactNode } from 'react'
+import { resolveCakeImage } from '@/data/localCatalog'
 import { AdminBadge, EnabledBadge } from '@/components/admin/AdminBadge'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
@@ -11,41 +11,45 @@ import {
   AdminTextField,
 } from '@/components/admin/AdminField'
 import { AdminList, AdminTable, Td, Th, Tr } from '@/components/admin/AdminTable'
+import { CakeImageField } from '@/components/admin/CakeImageField'
 import {
   CatalogEditor,
   CatalogListItem,
   CatalogResults,
   CatalogToolbar,
   EditButton,
-  ID_HINT_EDIT,
-  ID_HINT_NEW,
-  IdText,
-  SORT_HINT,
   useCatalogCrud,
   useCatalogFilter,
 } from '@/components/admin/catalog'
 import { IconCake, IconPlus, IconRefresh } from '@/components/admin/icons'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import {
+  deleteCakeImage,
+  generateId,
   listAdminCakes,
+  listAdminCategories,
   listAdminExtras,
   listAdminFillings,
   listAdminSizes,
   upsertAdminCake,
+  upsertAdminCategory,
   type AdminCakeRow,
   type AdminCakeSizeRow,
+  type AdminCategoryRow,
   type AdminExtraRow,
   type AdminFillingRow,
 } from '@/services/admin/adminCatalogService'
+
+const NEW_CATEGORY = '__new__'
 
 const empty: AdminCakeRow = {
   id: '',
   name: '',
   description: '',
-  image_key: 'butterflies',
+  image_key: '',
   image_alt: '',
   image_position: 'center',
-  category: 'birthday',
+  category: '',
   pricing_group: 'single',
   base_price: null,
   price_note: '',
@@ -57,18 +61,13 @@ const empty: AdminCakeRow = {
   enabled: true,
 }
 
-const CATEGORY_LABELS: Record<AdminCakeRow['category'], string> = {
-  birthday: 'عيد ميلاد',
-  celebration: 'مناسبة',
-}
-
 function toggleId(list: string[] | null, id: string): string[] {
   const current = list ?? []
   return current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
 }
 
 function Thumb({ imageKey, className = 'size-12' }: { imageKey: string; className?: string }) {
-  const src = cakeImageMap[imageKey]
+  const src = imageKey ? resolveCakeImage(imageKey) : ''
   return (
     <span className={`block shrink-0 overflow-hidden rounded-lg border border-line bg-cream ${className}`}>
       {src ? <img src={src} alt="" loading="lazy" className="size-full object-cover" /> : null}
@@ -105,39 +104,76 @@ export function AdminCakesPage() {
   const [sizes, setSizes] = useState<AdminCakeSizeRow[]>([])
   const [fillings, setFillings] = useState<AdminFillingRow[]>([])
   const [extras, setExtras] = useState<AdminExtraRow[]>([])
+  const [categories, setCategories] = useState<AdminCategoryRow[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState<string | null>(null)
+  const [newCategoryError, setNewCategoryError] = useState('')
+  const [addingCategory, setAddingCategory] = useState(false)
+  const sessionUploads = useRef(new Set<string>())
+  const cakeIds = useRef<string[]>([])
+  const nextSort = useRef(10)
+
+  function resetSession() {
+    setNewCategoryName(null)
+    setNewCategoryError('')
+    setUploading(false)
+  }
 
   const crud = useCatalogCrud<AdminCakeRow>({
     list: async () => {
-      const [cakesRes, sizesRes, fillingsRes, extrasRes] = await Promise.all([
+      const [cakesRes, sizesRes, fillingsRes, extrasRes, categoriesRes] = await Promise.all([
         listAdminCakes(),
         listAdminSizes(),
         listAdminFillings(),
         listAdminExtras(),
+        listAdminCategories(),
       ])
       setSizes(sizesRes.data ?? [])
       setFillings(fillingsRes.data ?? [])
       setExtras(extrasRes.data ?? [])
+      setCategories(categoriesRes.data ?? [])
+      cakeIds.current = (cakesRes.data ?? []).map((row) => row.id)
+      nextSort.current = Math.max(0, ...(cakesRes.data ?? []).map((row) => row.sort_order)) + 10
       return cakesRes
     },
     upsert: upsertAdminCake,
     prepare: (draft) => ({
       ...draft,
-      id: draft.id.trim(),
-      sort_order: Number(draft.sort_order) || 0,
+      id: draft.id || generateId(draft.name, 'cake', cakeIds.current),
+      name: draft.name.trim(),
+      sort_order: draft.id ? Number(draft.sort_order) || 0 : nextSort.current,
       base_price: draft.base_price == null || Number.isNaN(Number(draft.base_price)) ? null : Number(draft.base_price),
     }),
     validate: (draft) => ({
-      id: draft.id.trim() ? undefined : 'أدخلي المعرّف.',
       name: draft.name.trim() ? undefined : 'أدخلي اسم التورتة.',
+      category: draft.category && draft.category !== NEW_CATEGORY ? undefined : 'اختاري التصنيف.',
+      image_key: uploading ? 'انتظري حتى يكتمل رفع الصورة.' : draft.image_key ? undefined : 'أضيفي صورة للتورتة.',
     }),
+    onSaved: async (saved, previous) => {
+      const stale = [...sessionUploads.current].filter((path) => path !== saved.image_key)
+      if (previous?.image_key && previous.image_key !== saved.image_key) stale.push(previous.image_key)
+      sessionUploads.current.clear()
+      resetSession()
+      await Promise.all(stale.map(deleteCakeImage))
+    },
+    onDiscard: () => {
+      const unsaved = [...sessionUploads.current]
+      sessionUploads.current.clear()
+      resetSession()
+      void Promise.all(unsaved.map(deleteCakeImage))
+    },
   })
-  const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.id, row.description])
+  const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.description, categoryName(row.category)])
+
+  function categoryName(id: string) {
+    return categories.find((c) => c.id === id)?.name ?? id
+  }
 
   function startNew() {
     crud.open(
       {
         ...empty,
-        sort_order: (crud.rows.at(-1)?.sort_order ?? 0) + 10,
+        category: categories.find((c) => c.enabled)?.id ?? '',
         available_size_ids: sizes.filter((s) => s.enabled).map((s) => s.id),
         filling_ids: fillings.filter((f) => f.enabled).map((f) => f.id),
         extra_ids: extras.filter((e) => e.enabled).map((e) => e.id),
@@ -156,6 +192,38 @@ export function AdminCakesPage() {
       },
       row,
     )
+  }
+
+  async function addCategory() {
+    const name = (newCategoryName ?? '').trim()
+    if (!name) {
+      setNewCategoryError('أدخلي اسم التصنيف.')
+      return
+    }
+    const existing = categories.find((c) => c.name.trim() === name)
+    if (existing) {
+      crud.update({ category: existing.id })
+      setNewCategoryName(null)
+      return
+    }
+    setAddingCategory(true)
+    const row: AdminCategoryRow = {
+      id: generateId(name, 'category', categories.map((c) => c.id)),
+      name,
+      description: '',
+      sort_order: Math.max(0, ...categories.map((c) => c.sort_order)) + 10,
+      enabled: true,
+    }
+    const result = await upsertAdminCategory(row)
+    setAddingCategory(false)
+    if (!result.ok) {
+      setNewCategoryError(result.message)
+      return
+    }
+    setCategories((current) => [...current, row])
+    crud.update({ category: row.id })
+    setNewCategoryName(null)
+    setNewCategoryError('')
   }
 
   function optionsSummary(row: AdminCakeRow) {
@@ -179,7 +247,7 @@ export function AdminCakesPage() {
             <AdminButton icon={<IconRefresh size={18} />} loading={crud.refreshing} disabled={crud.loading} onClick={() => void crud.load(true)}>
               تحديث
             </AdminButton>
-            <AdminButton variant="primary" icon={<IconPlus size={18} />} onClick={startNew}>
+            <AdminButton variant="primary" icon={<IconPlus size={18} />} disabled={crud.loading} onClick={startNew}>
               إضافة تورتة
             </AdminButton>
           </>
@@ -189,7 +257,7 @@ export function AdminCakesPage() {
       {!crud.loading && !crud.error && crud.rows.length > 0 ? (
         <CatalogToolbar
           id="cakes-search"
-          placeholder="ابحثي باسم التورتة أو المعرّف"
+          placeholder="ابحثي باسم التورتة أو التصنيف"
           filter={filter}
           total={crud.rows.length}
           visible={filter.filtered.length}
@@ -221,7 +289,6 @@ export function AdminCakesPage() {
                 <Th>التورتة</Th>
                 <Th>التصنيف</Th>
                 <Th className="hidden xl:table-cell">الخيارات المتاحة</Th>
-                <Th className="text-center">الترتيب</Th>
                 <Th>الحالة</Th>
                 <Th>
                   <span className="sr-only">إجراء</span>
@@ -234,17 +301,13 @@ export function AdminCakesPage() {
                 <Td>
                   <div className="flex items-center gap-3">
                     <Thumb imageKey={row.image_key} />
-                    <div className="min-w-0">
-                      <p className="font-bold">{row.name}</p>
-                      <IdText>{row.id}</IdText>
-                    </div>
+                    <p className="min-w-0 font-bold">{row.name}</p>
                   </div>
                 </Td>
                 <Td>
-                  <AdminBadge tone="info">{CATEGORY_LABELS[row.category] ?? row.category}</AdminBadge>
+                  <AdminBadge tone="info">{categoryName(row.category)}</AdminBadge>
                 </Td>
                 <Td className="hidden text-[0.8125rem] text-muted xl:table-cell">{optionsSummary(row)}</Td>
-                <Td className="text-center text-muted tabular-nums">{row.sort_order}</Td>
                 <Td>
                   <EnabledBadge enabled={row.enabled} />
                 </Td>
@@ -262,12 +325,11 @@ export function AdminCakesPage() {
                 key={row.id}
                 media={<Thumb imageKey={row.image_key} className="size-14" />}
                 title={row.name}
-                subtitle={<IdText>{row.id}</IdText>}
                 meta={<span className="text-xs text-muted">{optionsSummary(row)}</span>}
                 badges={
                   <>
                     <EnabledBadge enabled={row.enabled} />
-                    <AdminBadge tone="info">{CATEGORY_LABELS[row.category] ?? row.category}</AdminBadge>
+                    <AdminBadge tone="info">{categoryName(row.category)}</AdminBadge>
                   </>
                 }
                 editLabel={`تعديل ${row.name}`}
@@ -283,8 +345,8 @@ export function AdminCakesPage() {
         size="lg"
         newTitle="تورتة جديدة"
         editTitle="تعديل التورتة"
-        disableTitle="تعطيل التورتة؟"
-        disableBody="لن تظهر هذه التورتة في كتالوج العملاء بعد الحفظ. الطلبات السابقة لا تتأثر، ويمكنك إعادة تفعيلها لاحقًا."
+        disableTitle="إخفاء التورتة؟"
+        disableBody="لن تظهر هذه التورتة للعملاء بعد الحفظ. الطلبات السابقة لا تتأثر، ويمكنك إظهارها مرة أخرى لاحقًا."
       >
         {draft ? (
           <>
@@ -295,85 +357,104 @@ export function AdminCakesPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <AdminTextField
                   id="cake-name"
-                  label="الاسم"
+                  label="اسم التورتة"
                   required
                   value={draft.name}
                   error={crud.fieldErrors.name}
                   onChange={(e) => crud.update({ name: e.target.value })}
                 />
-                <AdminTextField
-                  id="cake-id"
-                  label="المعرّف"
-                  required
-                  dir="ltr"
-                  className="text-start"
-                  value={draft.id}
-                  error={crud.fieldErrors.id}
-                  hint={crud.isNew ? ID_HINT_NEW : ID_HINT_EDIT}
-                  onChange={(e) => crud.update({ id: e.target.value })}
-                />
-                <AdminSelectField
-                  id="cake-category"
-                  label="التصنيف"
-                  value={draft.category}
-                  onChange={(e) => crud.update({ category: e.target.value as AdminCakeRow['category'] })}
-                >
-                  <option value="birthday">عيد ميلاد</option>
-                  <option value="celebration">مناسبة</option>
-                </AdminSelectField>
-                <div className="flex items-end gap-3">
+                <div className="grid content-start gap-2">
                   <AdminSelectField
-                    id="cake-image"
-                    label="مفتاح الصورة"
-                    wrapperClassName="min-w-0 flex-1"
-                    value={draft.image_key}
-                    onChange={(e) => crud.update({ image_key: e.target.value })}
+                    id="cake-category"
+                    label="التصنيف"
+                    required
+                    value={newCategoryName !== null ? NEW_CATEGORY : draft.category}
+                    error={crud.fieldErrors.category}
+                    onChange={(e) => {
+                      if (e.target.value === NEW_CATEGORY) {
+                        setNewCategoryName('')
+                        setNewCategoryError('')
+                        return
+                      }
+                      setNewCategoryName(null)
+                      crud.update({ category: e.target.value })
+                    }}
                   >
-                    {Object.keys(cakeImageMap).map((key) => (
-                      <option key={key} value={key}>
-                        {key}
+                    {!draft.category ? <option value="">اختاري التصنيف</option> : null}
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.enabled ? c.name : `${c.name} (مخفي)`}
                       </option>
                     ))}
+                    <option value={NEW_CATEGORY}>+ إضافة تصنيف جديد</option>
                   </AdminSelectField>
-                  <Thumb imageKey={draft.image_key} className="size-11" />
+                  {newCategoryName !== null ? (
+                    <div className="grid gap-2 rounded-lg border border-line bg-ivory/60 p-3">
+                      <AdminTextField
+                        id="cake-new-category"
+                        label="اسم التصنيف الجديد"
+                        autoFocus
+                        value={newCategoryName}
+                        error={newCategoryError}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            void addCategory()
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <AdminButton size="sm" variant="primary" loading={addingCategory} onClick={() => void addCategory()}>
+                          إضافة التصنيف
+                        </AdminButton>
+                        <AdminButton size="sm" disabled={addingCategory} onClick={() => setNewCategoryName(null)}>
+                          إلغاء
+                        </AdminButton>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-                <AdminTextAreaField
-                  id="cake-desc"
-                  label="الوصف"
-                  wrapperClassName="sm:col-span-2"
-                  value={draft.description}
-                  onChange={(e) => crud.update({ description: e.target.value })}
+                <CakeImageField
+                  id="cake-image"
+                  value={draft.image_key}
+                  error={crud.fieldErrors.image_key}
+                  onBusyChange={setUploading}
+                  onUploaded={(path) => {
+                    sessionUploads.current.add(path)
+                    crud.update({ image_key: path })
+                  }}
+                  onRemove={() => crud.update({ image_key: '' })}
                 />
                 <AdminTextField
                   id="cake-alt"
                   label="وصف الصورة"
-                  hint="نص بديل يقرؤه قارئ الشاشة."
+                  wrapperClassName="sm:col-span-2"
+                  hint="وصف قصير للصورة يساعد الموقع ومحركات البحث على فهمها."
                   value={draft.image_alt}
                   onChange={(e) => crud.update({ image_alt: e.target.value })}
                 />
-                <AdminTextField
-                  id="cake-sort"
-                  label="ترتيب العرض"
-                  type="number"
-                  inputMode="numeric"
-                  dir="ltr"
-                  className="text-start"
-                  hint={SORT_HINT}
-                  value={String(draft.sort_order)}
-                  onChange={(e) => crud.update({ sort_order: Number(e.target.value) })}
+                <AdminTextAreaField
+                  id="cake-desc"
+                  label="وصف التورتة"
+                  wrapperClassName="sm:col-span-2"
+                  hint="يظهر للعملاء أسفل اسم التورتة."
+                  value={draft.description}
+                  onChange={(e) => crud.update({ description: e.target.value })}
                 />
                 <AdminTextField
                   id="cake-note"
                   label="ملاحظة السعر"
                   wrapperClassName="sm:col-span-2"
+                  hint="ملاحظة اختيارية عن تسعير هذا التصميم. السعر نفسه يُحسب تلقائيًا من المقاس الذي يختاره العميل."
                   value={draft.price_note}
                   onChange={(e) => crud.update({ price_note: e.target.value })}
                 />
               </div>
               <AdminSwitch
                 id="cake-enabled"
-                label="مفعّلة في الموقع"
-                description="عند التعطيل تختفي التورتة من كتالوج العملاء."
+                label="إظهار التورتة في الموقع"
+                description="عند إيقافه لن تظهر التورتة للعملاء."
                 checked={draft.enabled}
                 onChange={(enabled) => crud.update({ enabled })}
               />

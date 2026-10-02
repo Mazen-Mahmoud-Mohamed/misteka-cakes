@@ -1,7 +1,7 @@
 import { createLocalCatalog, resolveCakeImage, type CatalogBundle } from '@/data/localCatalog'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase'
 import { getCatalog, getCatalogSource, setCatalog } from '@/services/catalogStore'
-import type { Cake, CakeSize, ChargeStatus, DataSource, DeliveryZone, DesignExtra, Filling, PricingGroup } from '@/types'
+import type { Cake, CakeCategoryInfo, CakeSize, ChargeStatus, DataSource, DeliveryZone, DesignExtra, Filling, PricingGroup } from '@/types'
 
 interface CakeSizeRow {
   id: string
@@ -131,12 +131,13 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
   const supabase = getSupabase()
   if (!supabase) return { ok: false, error: 'إعدادات الاتصال غير مكتملة.' }
 
-  const [sizesRes, cakesRes, fillingsRes, extrasRes, zonesRes] = await Promise.all([
+  const [sizesRes, cakesRes, fillingsRes, extrasRes, zonesRes, categoriesRes] = await Promise.all([
     supabase.from('cake_sizes').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('cakes').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('fillings').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('design_extras').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('delivery_zones').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('cake_categories').select('id, name').eq('enabled', true).order('sort_order'),
   ])
 
   // Sizes are the source of truth for /pricing — fail closed if they do not load.
@@ -150,7 +151,7 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     return { ok: false, error: 'لا توجد مقاسات مفعّلة للعرض.' }
   }
 
-  if (cakesRes.error || fillingsRes.error || extrasRes.error || zonesRes.error) {
+  if (cakesRes.error || fillingsRes.error || extrasRes.error || zonesRes.error || categoriesRes.error) {
     console.warn('Supabase catalog partial load; keeping remote sizes.', {
       cakes: cakesRes.error?.message,
       fillings: fillingsRes.error?.message,
@@ -160,7 +161,14 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
   }
 
   const local = createLocalCatalog()
-  const cakes = !cakesRes.error && (cakesRes.data?.length ?? 0) > 0 ? mapCakes((cakesRes.data ?? []) as CakeRow[]) : local.cakes
+  const categories = categoriesRes.error ? local.categories : ((categoriesRes.data ?? []) as CakeCategoryInfo[])
+  const visibleCategoryIds = new Set(categories.map((category) => category.id))
+  const remoteCakes = !cakesRes.error && (cakesRes.data?.length ?? 0) > 0 ? mapCakes((cakesRes.data ?? []) as CakeRow[]) : null
+  const cakes = remoteCakes
+    ? categoriesRes.error
+      ? remoteCakes
+      : remoteCakes.filter((cake) => visibleCategoryIds.has(cake.category))
+    : local.cakes
   const fillings =
     !fillingsRes.error && (fillingsRes.data?.length ?? 0) > 0 ? mapFillings((fillingsRes.data ?? []) as FillingRow[]) : local.fillings
   const extras =
@@ -171,6 +179,7 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     ok: true,
     bundle: {
       cakes,
+      categories,
       sizes,
       fillings,
       extras,

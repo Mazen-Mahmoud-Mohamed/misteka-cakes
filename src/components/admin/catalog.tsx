@@ -22,11 +22,15 @@ export function useCatalogCrud<T extends Row>({
   upsert,
   prepare,
   validate,
+  onSaved,
+  onDiscard,
 }: {
   list: () => Promise<{ data: T[] | null; error: string | null }>
   upsert: (row: T) => Promise<SaveResult>
   prepare: (draft: T) => T
   validate: (draft: T) => FieldErrors
+  onSaved?: (saved: T, previous: T | null) => void | Promise<void>
+  onDiscard?: (draft: T) => void
 }) {
   const [rows, setRows] = useState<T[]>([])
   const [loading, setLoading] = useState(true)
@@ -72,6 +76,7 @@ export function useCatalogCrud<T extends Row>({
 
   function close() {
     if (saving) return
+    if (draft) onDiscard?.(draft)
     setDraft(null)
     setOriginal(null)
     setConfirmDisable(false)
@@ -93,7 +98,8 @@ export function useCatalogCrud<T extends Row>({
     if (!draft) return
     setSaving(true)
     setFormError('')
-    const result = await upsert(prepare(draft))
+    const payload = prepare(draft)
+    const result = await upsert(payload)
     setSaving(false)
     setConfirmDisable(false)
     if (!result.ok) {
@@ -102,6 +108,7 @@ export function useCatalogCrud<T extends Row>({
       setFlash({ tone: 'error', text: SAVE_ERROR })
       return
     }
+    await onSaved?.(payload, original)
     setDraft(null)
     setOriginal(null)
     setFlash({ tone: 'success', text: SAVE_SUCCESS })

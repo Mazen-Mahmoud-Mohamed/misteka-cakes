@@ -11,6 +11,7 @@ import { AdminLoginPage } from '@/pages/admin/AdminLoginPage'
 import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
 import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage'
 import { AdminCakesPage } from '@/pages/admin/AdminCakesPage'
+import { AdminCategoriesPage } from '@/pages/admin/AdminCategoriesPage'
 import { AdminSizesPage } from '@/pages/admin/AdminSizesPage'
 import { AdminFillingsPage } from '@/pages/admin/AdminFillingsPage'
 import { AdminExtrasPage } from '@/pages/admin/AdminExtrasPage'
@@ -67,6 +68,7 @@ function AdminRoutes() {
             <Route path="orders" element={<AdminOrdersPage />} />
             <Route path="orders/:id" element={<AdminOrderDetailPage />} />
             <Route path="cakes" element={<AdminCakesPage />} />
+            <Route path="categories" element={<AdminCategoriesPage />} />
             <Route path="sizes" element={<AdminSizesPage />} />
             <Route path="fillings" element={<AdminFillingsPage />} />
             <Route path="extras" element={<AdminExtrasPage />} />

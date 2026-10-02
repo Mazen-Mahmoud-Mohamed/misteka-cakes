@@ -6,7 +6,7 @@ import pearls from '@/assets/cakes/pearls.jpeg'
 import ribbons from '@/assets/cakes/ribbons.jpeg'
 import { fillings } from '@/data/options'
 import { singleTierSizes } from '@/data/pricing'
-import type { Cake, CakeCategory } from '@/types'
+import type { Cake, CakeCategoryInfo } from '@/types'
 
 const priceNote = 'السعر حسب المقاس من قائمة التورت الأساسية. تفاصيل التصميم خارج القائمة تُراجع قبل التأكيد.'
 const servingInfo = 'عدد الأفراد يحدد المقاس المناسب من قائمة الأسعار.'
@@ -29,11 +29,12 @@ function cake(
   }
 }
 
-export const categoryLabels: Record<CakeCategory | 'all', string> = {
-  all: 'الكل',
-  birthday: 'أعياد ميلاد',
-  celebration: 'مناسبات',
-}
+export const ALL_CATEGORIES_LABEL = 'الكل'
+
+export const localCategories: CakeCategoryInfo[] = [
+  { id: 'birthday', name: 'أعياد ميلاد' },
+  { id: 'celebration', name: 'مناسبات' },
+]
 
 export const cakes: Cake[] = [
   cake({

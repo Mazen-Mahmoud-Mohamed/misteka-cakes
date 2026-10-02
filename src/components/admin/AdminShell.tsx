@@ -15,6 +15,7 @@ import {
   IconOrders,
   IconRuler,
   IconSparkles,
+  IconTag,
   Spinner,
 } from '@/components/admin/icons'
 import { brand } from '@/data/brand'
@@ -34,6 +35,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
     label: 'الكتالوج',
     items: [
       { to: '/admin/cakes', label: 'التورت', end: false, icon: <IconCake /> },
+      { to: '/admin/categories', label: 'التصنيفات', end: false, icon: <IconTag /> },
       { to: '/admin/sizes', label: 'المقاسات والأسعار', end: false, icon: <IconRuler /> },
       { to: '/admin/fillings', label: 'الحشوات', end: false, icon: <IconLayers /> },
       { to: '/admin/extras', label: 'الإضافات', end: false, icon: <IconSparkles /> },

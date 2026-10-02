@@ -12,6 +12,14 @@ export function listCakes(): Cake[] {
   return getCatalog().cakes
 }
 
+export function listCategories() {
+  return getCatalog().categories
+}
+
+export function getCategoryLabel(id: string): string {
+  return getCatalog().categories.find((category) => category.id === id)?.name ?? ''
+}
+
 export function getCake(id: string): Cake | undefined {
   return getCatalog().cakes.find((cake) => cake.id === id)
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { ButtonLink } from '@/components/ui/Button'
-import { categoryLabels } from '@/data/cakes'
+import { getCategoryLabel } from '@/services/catalogService'
 import type { Cake } from '@/types'
 import { cx } from '@/utils/cx'
 
@@ -395,7 +395,7 @@ export function CakeCarousel({ cakes }: { cakes: Cake[] }) {
 
       <div className="mx-auto w-full max-w-md text-center">
         <p className="text-xs font-semibold text-rose">
-          {categoryLabels[cake.category]}
+          {getCategoryLabel(cake.category)}
           <span className="text-muted"> · </span>
           <span className="text-muted tabular-nums">
             {active + 1} من {count}
