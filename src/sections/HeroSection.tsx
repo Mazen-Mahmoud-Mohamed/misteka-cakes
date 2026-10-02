@@ -10,11 +10,15 @@ export function HeroSection() {
     <section className="pt-8 pb-12 sm:pt-12 sm:pb-16 lg:pt-14 lg:pb-20">
       <Container className="grid items-center gap-10 lg:grid-cols-[1fr_1.05fr] lg:gap-16">
         <div className="rise text-center lg:text-start">
-          <img
-            src={brand.logo}
-            alt={brand.logoAlt}
-            className="mx-auto size-36 rounded-full object-cover sm:size-44 lg:mx-0"
-          />
+          <span className="mx-auto block size-36 overflow-hidden rounded-full sm:size-44 lg:mx-0">
+            {/* The ring sits at 47.7% / 45% of the canvas and spans ~82%; centre it and fill the circle. */}
+            <img
+              src={brand.logo}
+              alt={brand.logoAlt}
+              className="block size-full object-cover"
+              style={{ transform: 'translate(2.6%, 5.8%) scale(1.15)' }}
+            />
+          </span>
           <p className="mt-5 font-latin text-lg tracking-[0.18em] text-[#8a6532]">{brand.nameEn}</p>
           <h1 className="mt-2 font-display text-4xl leading-tight text-rose-deep sm:text-5xl lg:text-[3.4rem]">
             <TextType text={brand.tagline} />

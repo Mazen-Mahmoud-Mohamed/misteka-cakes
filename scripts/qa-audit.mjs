@@ -32,6 +32,9 @@ async function measureOverflow(page) {
       .filter((el) => {
         if (!(el instanceof HTMLElement)) return false
         if (el.matches('.skip-link, .sr-only, [aria-hidden="true"]')) return false
+        // The 3D showcases clip off-stage cakes on purpose; page-level overflow is still checked below.
+        const showcase = '[aria-roledescription="معرض"], [data-showcase]'
+        if (el.closest(showcase) || el.querySelector(showcase)) return false
         const style = getComputedStyle(el)
         if (style.position === 'fixed' || style.position === 'sticky') return false
         const rect = el.getBoundingClientRect()

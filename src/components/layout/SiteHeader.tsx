@@ -25,8 +25,16 @@ export function SiteHeader() {
     <header className="sticky top-0 z-40 border-b border-line/80 bg-ivory/90 backdrop-blur-md">
       <Container className="flex min-h-20 items-center justify-between gap-3">
         <Link to="/" className="flex min-w-0 items-center gap-2" onClick={close}>
-          <img src={brand.logo} alt="" className="size-12 shrink-0 rounded-full object-cover" />
-          <span className="truncate font-display text-3xl leading-none text-rose-deep">{brand.nameAr}</span>
+          <span className="block size-12 shrink-0 overflow-hidden rounded-full">
+            {/* The ring sits at 47.7% / 45% of the canvas and spans ~82%; centre it and fill the circle. */}
+            <img
+              src={brand.logo}
+              alt=""
+              className="block size-full object-cover"
+              style={{ transform: 'translate(2.6%, 5.8%) scale(1.15)' }}
+            />
+          </span>
+          <span className="truncate py-1 pe-2 font-display text-3xl leading-none text-rose-deep">{brand.nameAr}</span>
         </Link>
 
         <nav className="hidden items-center gap-2 lg:flex" aria-label="التنقل الرئيسي">

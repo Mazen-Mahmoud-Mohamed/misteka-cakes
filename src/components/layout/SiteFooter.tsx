@@ -53,7 +53,15 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-line/80 bg-paper">
       <Container className="py-14 text-center sm:py-16">
-        <img src={brand.logo} alt={brand.logoAlt} className="mx-auto size-24 rounded-full object-cover" />
+        <span className="mx-auto block size-24 overflow-hidden rounded-full">
+          {/* The ring sits at 47.7% / 45% of the canvas and spans ~82%; centre it and fill the circle. */}
+          <img
+            src={brand.logo}
+            alt={brand.logoAlt}
+            className="block size-full object-cover"
+            style={{ transform: 'translate(2.6%, 5.8%) scale(1.15)' }}
+          />
+        </span>
         <p className="mt-4 font-display text-3xl text-rose-deep">{brand.nameAr}</p>
         <p className="font-latin text-lg tracking-[0.18em] text-[#8a6532]">{brand.nameEn}</p>
         <p className="mt-2 text-muted">{brand.tagline}</p>
