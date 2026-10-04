@@ -80,7 +80,7 @@ function mapCakes(rows: CakeRow[]): Cake[] {
     name: row.name,
     description: row.description,
     image: resolveCakeImage(row.image_key),
-    imageAlt: row.image_alt,
+    imageAlt: row.image_alt.trim() || row.name,
     imagePosition: row.image_position,
     category: row.category,
     pricingGroup: row.pricing_group,

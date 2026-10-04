@@ -17,7 +17,7 @@ export function CakeCard({ cake, className }: { cake: Cake; className?: string }
       </div>
       <div className="flex flex-1 flex-col p-5 sm:p-6">
         <p className="text-xs font-semibold text-rose">{getCategoryLabel(cake.category)}</p>
-        <h3 className="mt-1.5 font-display text-2xl leading-snug text-rose-deep sm:text-[1.75rem]">{cake.name}</h3>
+        <h2 className="mt-1.5 font-display text-2xl leading-snug text-rose-deep sm:text-[1.75rem]">{cake.name}</h2>
         <p className="mt-2 text-sm leading-7 text-muted">{cake.description}</p>
         <div className="mt-auto flex flex-col gap-1 pt-5">
           <ButtonLink to={`/order?cake=${cake.id}&mode=catalog`} className="w-full">

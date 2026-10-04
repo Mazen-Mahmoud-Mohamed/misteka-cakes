@@ -1,0 +1,18 @@
+# مستكة (Mestika)
+
+> مستكة تقدّم تورت أعياد ميلاد ومناسبات حسب الطلب، مع توصيل داخل القاهرة والجيزة. الحجز قبل موعد الاستلام بثلاثة أيام على الأقل.
+
+The site is a single-page app; sections are reached through the hash routes below.
+
+## Public pages
+
+- [الرئيسية](https://mestika.qd.je/): brand overview, featured cake designs and how ordering works.
+- [التورت](https://mestika.qd.je/#/catalog): catalog of cake designs grouped by category.
+- [الأسعار](https://mestika.qd.je/#/pricing): price list by cake size (single tier and two tiers).
+- [طلب تورتة](https://mestika.qd.je/#/order): online order form for catalog, similar or custom designs.
+- [متابعة الطلب](https://mestika.qd.je/#/track-order): check the status of an existing order.
+
+## Contact
+
+- Instagram: https://www.instagram.com/mestika_cakes
+- Facebook: https://www.facebook.com/share/14vQQyXqafN/

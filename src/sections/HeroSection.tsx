@@ -36,6 +36,7 @@ export function HeroSection() {
         <div className="rise mx-auto w-full max-w-md sm:max-w-lg lg:max-w-none">
           <img
             src={butterflies}
+            fetchPriority="high"
             alt="تورتة وردية من مستكة، مزينة بفراشات وخرز"
             className="aspect-[4/5] w-full rounded-3xl object-cover object-[center_30%] shadow-soft"
           />

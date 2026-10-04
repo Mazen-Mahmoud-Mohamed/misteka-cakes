@@ -6,7 +6,7 @@ import { HeroSection } from '@/sections/HeroSection'
 import { StepsSection } from '@/sections/StepsSection'
 
 export function HomePage() {
-  usePageTitle('مستكة | Mestika')
+  usePageTitle('مستكة | تورت أعياد ميلاد ومناسبات حسب الطلب')
 
   return (
     <>

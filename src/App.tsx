@@ -38,11 +38,18 @@ function ScrollManager() {
 function CustomerLayout() {
   return (
     <div className="flex min-h-screen flex-col">
-      <a className="skip-link" href="#content">
+      <a
+        className="skip-link"
+        href="#content"
+        onClick={(event) => {
+          event.preventDefault()
+          document.getElementById('content')?.focus()
+        }}
+      >
         تخطّي إلى المحتوى
       </a>
       <SiteHeader />
-      <main id="content" className="flex-1">
+      <main id="content" tabIndex={-1} className="flex-1 outline-none">
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/catalog" element={<CatalogPage />} />
@@ -58,6 +65,14 @@ function CustomerLayout() {
 }
 
 function AdminRoutes() {
+  useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.name = 'robots'
+    meta.content = 'noindex, nofollow'
+    document.head.appendChild(meta)
+    return () => meta.remove()
+  }, [])
+
   return (
     <AdminAuthProvider>
       <Routes>

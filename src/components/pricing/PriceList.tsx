@@ -12,7 +12,7 @@ export function PriceList({
 }) {
   return (
     <section>
-      <h3 className="font-display text-3xl text-rose-deep">{title}</h3>
+      <h2 className="font-display text-3xl text-rose-deep">{title}</h2>
       {note ? <p className="mt-1 text-sm leading-6 text-muted">{note}</p> : null}
 
       <ul className="mt-5 divide-y divide-line/80 border-t border-line/80">

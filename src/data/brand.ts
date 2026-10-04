@@ -1,4 +1,4 @@
-import logo from '@/assets/brand/logo.png'
+import logo from '@/assets/brand/logo-480.webp'
 
 export const brand = {
   nameAr: 'مستكة',
