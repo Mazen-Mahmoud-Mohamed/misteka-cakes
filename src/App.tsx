@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AdminShell } from '@/components/admin/AdminShell'
 import { RequireAdmin } from '@/components/admin/RequireAdmin'
+import { PixelSnowBackground } from '@/components/background/PixelSnowBackground'
 import { SiteFooter } from '@/components/layout/SiteFooter'
 import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AdminAuthProvider } from '@/providers/AdminAuthProvider'
@@ -37,29 +38,32 @@ function ScrollManager() {
 
 function CustomerLayout() {
   return (
-    <div className="flex min-h-screen flex-col">
-      <a
-        className="skip-link"
-        href="#content"
-        onClick={(event) => {
-          event.preventDefault()
-          document.getElementById('content')?.focus()
-        }}
-      >
-        تخطّي إلى المحتوى
-      </a>
-      <SiteHeader />
-      <main id="content" tabIndex={-1} className="flex-1 outline-none">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/catalog" element={<CatalogPage />} />
-          <Route path="/pricing" element={<PricingPage />} />
-          <Route path="/order" element={<OrderPage />} />
-          <Route path="/track-order" element={<TrackOrderPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </main>
-      <SiteFooter />
+    <div className="relative isolate flex min-h-screen flex-col">
+      <PixelSnowBackground />
+      <div className="relative z-10 flex min-h-screen flex-col">
+        <a
+          className="skip-link"
+          href="#content"
+          onClick={(event) => {
+            event.preventDefault()
+            document.getElementById('content')?.focus()
+          }}
+        >
+          تخطّي إلى المحتوى
+        </a>
+        <SiteHeader />
+        <main id="content" tabIndex={-1} className="flex-1 outline-none">
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/catalog" element={<CatalogPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/order" element={<OrderPage />} />
+            <Route path="/track-order" element={<TrackOrderPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </main>
+        <SiteFooter />
+      </div>
     </div>
   )
 }
