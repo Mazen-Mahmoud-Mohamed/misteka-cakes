@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import { PixelSnowBackground } from '@/components/background/PixelSnowBackground'
+import { RamadanThemeLayer } from '@/components/background/RamadanThemeLayer'
 import { useTheme } from '@/providers/ThemeProvider'
 import type { ThemeId } from '@/types/theme'
 
@@ -8,12 +9,10 @@ type ThemeEffectEntry = {
   Component: ComponentType
 }
 
-/**
- * Registry of customer-facing decorative effects.
- * Ramadan is intentionally absent until its visual layer is implemented.
- */
+/** Registry of customer-facing decorative effects. */
 const THEME_EFFECT_REGISTRY: ThemeEffectEntry[] = [
   { id: 'pixel_snow', Component: PixelSnowBackground },
+  { id: 'ramadan', Component: RamadanThemeLayer },
 ]
 
 /** Mounts only registered, enabled theme effects. Customer routes only. */

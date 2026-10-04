@@ -95,7 +95,7 @@ export function AdminThemePage() {
           <AdminSwitch
             id="theme-ramadan"
             label="المظهر الرمضاني"
-            description="تفعيل إعداد المظهر الرمضاني في الموقع. الطبقة البصرية الرمضانية ستُضاف لاحقًا؛ التبديل يحفظ الحالة فقط الآن."
+            description="تفعيل الزينة الرمضانية (فوانيس، هلال، وزخارف خفيفة) في خلفية صفحات الزوّار."
             checked={ramadanEnabled}
             onChange={(next) => {
               if (saving) return
@@ -104,8 +104,8 @@ export function AdminThemePage() {
           />
 
           {ramadanEnabled ? (
-            <AdminAlert tone="info" title="المظهر الرمضاني">
-              الإعداد مفعّل وسيُستخدم عند إضافة الزينة الرمضانية. لا تظهر زينة رمضانية على الموقع حاليًا.
+            <AdminAlert tone="info" title="المظهر الرمضاني مفعّل">
+              تظهر الزينة الرمضانية لزوّار الموقع بعد تحديث الصفحة. لوحة الإدارة تبقى بدون زينة.
             </AdminAlert>
           ) : null}
         </AdminCard>
