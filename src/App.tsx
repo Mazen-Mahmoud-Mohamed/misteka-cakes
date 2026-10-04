@@ -2,11 +2,12 @@ import { useEffect } from 'react'
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AdminShell } from '@/components/admin/AdminShell'
 import { RequireAdmin } from '@/components/admin/RequireAdmin'
-import { PixelSnowBackground } from '@/components/background/PixelSnowBackground'
+import { CustomerThemeEffects } from '@/components/background/CustomerThemeEffects'
 import { SiteFooter } from '@/components/layout/SiteFooter'
 import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AdminAuthProvider } from '@/providers/AdminAuthProvider'
 import { CatalogProvider } from '@/providers/CatalogProvider'
+import { ThemeProvider } from '@/providers/ThemeProvider'
 import { AdminHomePage } from '@/pages/admin/AdminHomePage'
 import { AdminLoginPage } from '@/pages/admin/AdminLoginPage'
 import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
@@ -17,6 +18,7 @@ import { AdminSizesPage } from '@/pages/admin/AdminSizesPage'
 import { AdminFillingsPage } from '@/pages/admin/AdminFillingsPage'
 import { AdminExtrasPage } from '@/pages/admin/AdminExtrasPage'
 import { AdminZonesPage } from '@/pages/admin/AdminZonesPage'
+import { AdminThemePage } from '@/pages/admin/AdminThemePage'
 import { CatalogPage } from '@/pages/CatalogPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -39,7 +41,7 @@ function ScrollManager() {
 function CustomerLayout() {
   return (
     <div className="relative isolate flex min-h-screen flex-col">
-      <PixelSnowBackground />
+      <CustomerThemeEffects />
       <div className="relative z-10 flex min-h-screen flex-col">
         <a
           className="skip-link"
@@ -92,6 +94,7 @@ function AdminRoutes() {
             <Route path="fillings" element={<AdminFillingsPage />} />
             <Route path="extras" element={<AdminExtrasPage />} />
             <Route path="zones" element={<AdminZonesPage />} />
+            <Route path="theme" element={<AdminThemePage />} />
           </Route>
         </Route>
         <Route path="/admin/*" element={<Navigate to="/admin/login" replace />} />
@@ -107,7 +110,9 @@ function AppRoutes() {
   if (isAdmin) return <AdminRoutes />
   return (
     <CatalogProvider>
-      <CustomerLayout />
+      <ThemeProvider>
+        <CustomerLayout />
+      </ThemeProvider>
     </CatalogProvider>
   )
 }
