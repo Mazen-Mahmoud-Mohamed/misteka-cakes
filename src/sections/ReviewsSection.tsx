@@ -61,54 +61,54 @@ function stackTransforms(count: number, bp: Breakpoint): string[] {
   if (count === 1) return ['rotate(-2deg)']
 
   if (bp === 'mobile') {
-    if (count === 2) return ['rotate(-7deg) translateX(-1.35rem)', 'rotate(7deg) translateX(1.35rem)']
+    if (count === 2) return ['rotate(-7deg) translateX(-1.65rem)', 'rotate(7deg) translateX(1.65rem)']
     return [
-      'rotate(-8deg) translateX(-2rem)',
-      'rotate(2deg) translateX(-0.35rem)',
-      'rotate(8deg) translateX(2rem)',
+      'rotate(-8deg) translateX(-2.4rem)',
+      'rotate(2deg) translateX(-0.45rem)',
+      'rotate(8deg) translateX(2.4rem)',
     ].slice(0, Math.min(count, 3))
   }
 
   if (bp === 'tablet') {
-    if (count === 2) return ['rotate(-8deg) translateX(-3rem)', 'rotate(8deg) translateX(3rem)']
+    if (count === 2) return ['rotate(-8deg) translateX(-3.5rem)', 'rotate(8deg) translateX(3.5rem)']
     if (count === 3) {
       return [
-        'rotate(-8deg) translateX(-4.25rem)',
+        'rotate(-8deg) translateX(-5rem)',
         'rotate(0deg)',
-        'rotate(8deg) translateX(4.25rem)',
+        'rotate(8deg) translateX(5rem)',
       ]
     }
     return [
-      'rotate(-9deg) translateX(-5.5rem)',
-      'rotate(-3deg) translateX(-1.75rem)',
-      'rotate(3deg) translateX(1.75rem)',
-      'rotate(9deg) translateX(5.5rem)',
+      'rotate(-9deg) translateX(-6.5rem)',
+      'rotate(-3deg) translateX(-2rem)',
+      'rotate(3deg) translateX(2rem)',
+      'rotate(9deg) translateX(6.5rem)',
     ].slice(0, Math.min(count, 4))
   }
 
   // desktop
-  if (count === 2) return ['rotate(-8deg) translateX(-5rem)', 'rotate(8deg) translateX(5rem)']
+  if (count === 2) return ['rotate(-8deg) translateX(-6rem)', 'rotate(8deg) translateX(6rem)']
   if (count === 3) {
     return [
-      'rotate(-7deg) translateX(-6.5rem)',
+      'rotate(-7deg) translateX(-8rem)',
       'rotate(0deg)',
-      'rotate(7deg) translateX(6.5rem)',
+      'rotate(7deg) translateX(8rem)',
     ]
   }
   if (count === 4) {
     return [
-      'rotate(-9deg) translateX(-8.5rem)',
-      'rotate(-3deg) translateX(-2.75rem)',
-      'rotate(3deg) translateX(2.75rem)',
-      'rotate(9deg) translateX(8.5rem)',
+      'rotate(-9deg) translateX(-10.5rem)',
+      'rotate(-3deg) translateX(-3.35rem)',
+      'rotate(3deg) translateX(3.35rem)',
+      'rotate(9deg) translateX(10.5rem)',
     ]
   }
   return [
-    'rotate(-10deg) translateX(-9.5rem)',
-    'rotate(-4deg) translateX(-4.75rem)',
+    'rotate(-10deg) translateX(-11.5rem)',
+    'rotate(-4deg) translateX(-5.75rem)',
     'rotate(0deg)',
-    'rotate(4deg) translateX(4.75rem)',
-    'rotate(10deg) translateX(9.5rem)',
+    'rotate(4deg) translateX(5.75rem)',
+    'rotate(10deg) translateX(11.5rem)',
   ].slice(0, Math.min(count, 5))
 }
 
@@ -283,7 +283,7 @@ function BounceCardsStack({
   const transforms = stackTransforms(visible.length, bp)
   const pushPx = hoverPushPx(bp)
   const cardSize =
-    bp === 'mobile' ? 'size-[7.25rem]' : bp === 'tablet' ? 'size-[9.5rem]' : 'size-[11.5rem]'
+    bp === 'mobile' ? 'size-[9rem]' : bp === 'tablet' ? 'size-[11.25rem]' : 'size-[14rem]'
 
   useEffect(() => {
     const el = rootRef.current
@@ -329,7 +329,7 @@ function BounceCardsStack({
     <div
       ref={rootRef}
       className={cx(
-        'mestika-bounce-stack relative mx-auto flex h-[13.5rem] w-full max-w-[22rem] items-center justify-center overflow-visible sm:h-[17rem] sm:max-w-[28rem] lg:h-[20rem] lg:max-w-[34rem]',
+        'mestika-bounce-stack relative mx-auto flex h-[16.5rem] w-full max-w-[22rem] items-center justify-center overflow-visible sm:h-[20.5rem] sm:max-w-[30rem] lg:h-[24rem] lg:max-w-[38rem]',
         inView && 'is-inview',
       )}
       role="group"
