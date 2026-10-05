@@ -9,6 +9,8 @@ import { join } from 'node:path'
 
 const BASE = process.env.PREVIEW_URL || 'http://127.0.0.1:4173'
 const widths = [360, 390, 430, 768, 1024, 1280, 1440, 1920]
+/** Must match REVIEWS_AUTOPLAY_MS in ReviewsSection.tsx (+ buffer) */
+const AUTOPLAY_WAIT_MS = 5500
 const outDir = join('qa-output', 'reviews-bounce')
 mkdirSync(outDir, { recursive: true })
 const results = []
@@ -69,6 +71,40 @@ async function main() {
 
     let lightboxOk = null
     let hoverOk = null
+    let autoplayOk = null
+    if (width === 1280 && metrics.hasReviews) {
+      const storyCounter = page.locator('#reviews .tabular-nums').first()
+      const hasCounter = (await storyCounter.count()) > 0
+      if (hasCounter) {
+        const before = (await storyCounter.textContent()) ?? ''
+        const totalMatch = before.match(/\d+\s+من\s+(\d+)/)
+        const totalStories = totalMatch ? Number(totalMatch[1]) : 0
+        if (totalStories >= 2) {
+          await page.locator('.reviews-story-autoplay[data-autoplay="on"]').waitFor({ timeout: 20000 })
+          const beforeTick = (await storyCounter.textContent()) ?? ''
+          await page.waitForTimeout(AUTOPLAY_WAIT_MS)
+          const after = (await storyCounter.textContent()) ?? ''
+          const advanced = beforeTick !== after
+          autoplayOk = advanced
+
+          const atOpen = after
+          await page.locator('.mestika-bounce-card').first().click()
+          await page.waitForTimeout(AUTOPLAY_WAIT_MS + 500)
+          const duringLb = (await storyCounter.textContent()) ?? ''
+          const lbPaused = atOpen === duringLb
+          await page.keyboard.press('Escape')
+          await page.waitForTimeout(300)
+          await page.mouse.move(0, 0)
+          await page.waitForTimeout(200)
+          await page.waitForTimeout(AUTOPLAY_WAIT_MS)
+          const afterClose = (await storyCounter.textContent()) ?? ''
+          autoplayOk = autoplayOk && lbPaused && afterClose !== duringLb
+        } else {
+          autoplayOk = null
+        }
+      }
+    }
+
     if (width === 1280 && metrics.cardCount > 0) {
       const fanCount = await page.locator('.mestika-bounce-fan').count()
       const hoverTarget = page.locator('.mestika-bounce-fan').nth(Math.min(1, Math.max(0, fanCount - 1)))
@@ -129,13 +165,27 @@ async function main() {
           cs.animationDuration === '0s' ||
           (Number.parseFloat(cs.opacity) === 1 && cs.transform.includes('matrix'))
         const fanOk = fanCs.transitionDuration === '0s' || fanCs.transitionProperty === 'none'
-        return cardOk && fanOk
+        const autoplayOff =
+          document.querySelector('.reviews-story-autoplay')?.getAttribute('data-autoplay') === 'off'
+        return cardOk && fanOk && autoplayOff
       })
+      const rmCounter = page.locator('#reviews .tabular-nums').first()
+      if ((await rmCounter.count()) > 0) {
+        const rmBefore = (await rmCounter.textContent()) ?? ''
+        await page.waitForTimeout(AUTOPLAY_WAIT_MS + 500)
+        const rmAfter = (await rmCounter.textContent()) ?? ''
+        if (rmBefore !== rmAfter) reducedOk = false
+      }
       await page.emulateMedia({ reducedMotion: 'no-preference' })
     }
 
     const overflow = metrics.scrollWidth > metrics.clientWidth + 1
-    const ok = !overflow && errors.length === 0 && metrics.cardsOutside === 0 && (hoverOk === null || hoverOk === true)
+    const ok =
+      !overflow &&
+      errors.length === 0 &&
+      metrics.cardsOutside === 0 &&
+      (hoverOk === null || hoverOk === true) &&
+      (autoplayOk === null || autoplayOk === true)
     results.push({
       width,
       ok,
@@ -143,12 +193,13 @@ async function main() {
       ...metrics,
       lightboxOk,
       hoverOk,
+      autoplayOk,
       reducedOk,
       errors: [...errors],
       shot,
     })
     console.log(
-      `${ok ? 'PASS' : 'FAIL'} ${width} overflow=${overflow} reviews=${metrics.hasReviews} cards=${metrics.cardCount} outside=${metrics.cardsOutside} lb=${lightboxOk} hover=${hoverOk} rm=${reducedOk} err=${errors.length}`,
+      `${ok ? 'PASS' : 'FAIL'} ${width} overflow=${overflow} reviews=${metrics.hasReviews} cards=${metrics.cardCount} outside=${metrics.cardsOutside} lb=${lightboxOk} hover=${hoverOk} autoplay=${autoplayOk} rm=${reducedOk} err=${errors.length}`,
     )
   }
 

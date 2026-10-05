@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Container } from '@/components/layout/Container'
 import { Ornament } from '@/components/ui/SectionHeading'
 import {
@@ -12,6 +12,9 @@ import {
   type PublicReview,
 } from '@/types/reviews'
 import { cx } from '@/utils/cx'
+
+/** Interval between automatic testimonial story changes (ms). */
+export const REVIEWS_AUTOPLAY_MS = 5000
 
 type Breakpoint = 'mobile' | 'tablet' | 'desktop'
 
@@ -36,6 +39,20 @@ function useBreakpoint(): Breakpoint {
 
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => prefersReducedMotion())
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const apply = () => setReduced(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+
+  return reduced
 }
 
 /** Responsive fan transforms — inspired by BounceCards, sized for Mestika. */
@@ -414,18 +431,25 @@ function StoryNav({
   onPrev,
   onNext,
   onSelect,
+  showAutoplayHint,
 }: {
   index: number
   total: number
   onPrev: () => void
   onNext: () => void
   onSelect: (i: number) => void
+  showAutoplayHint?: boolean
 }) {
   const labelId = useId()
   if (total <= 1) return null
 
   return (
     <div className="mt-10 flex flex-col items-center gap-3" aria-labelledby={labelId}>
+      {showAutoplayHint ? (
+        <p className="sr-only">
+          الشهادات تتناوب تلقائيًا. استخدمي الأسهم أو النقاط للتنقل يدويًا.
+        </p>
+      ) : null}
       <p id={labelId} className="text-xs font-semibold tabular-nums text-muted">
         {index + 1} من {total}
       </p>
@@ -474,6 +498,11 @@ export function ReviewsSection() {
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number; alts: string[] } | null>(
     null,
   )
+  const [autoplayEpoch, setAutoplayEpoch] = useState(0)
+  const [hoverPaused, setHoverPaused] = useState(false)
+  const reducedMotion = useReducedMotion()
+  const finePointer = useFinePointerHover()
+  const storyCountRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -492,16 +521,52 @@ export function ReviewsSection() {
     if (storyIndex >= reviews.length) setStoryIndex(0)
   }, [reviews.length, storyIndex])
 
+  storyCountRef.current = reviews.length
+
+  const resetAutoplayTimer = useCallback(() => {
+    setAutoplayEpoch((e) => e + 1)
+  }, [])
+
+  const goStoryManual = useCallback(
+    (delta: number) => {
+      const n = storyCountRef.current
+      if (n <= 0) return
+      setStoryIndex((i) => (i + delta + n) % n)
+      resetAutoplayTimer()
+    },
+    [resetAutoplayTimer],
+  )
+
+  const selectStoryManual = useCallback(
+    (index: number) => {
+      setStoryIndex(index)
+      resetAutoplayTimer()
+    },
+    [resetAutoplayTimer],
+  )
+
+  const lightboxOpen = lightbox !== null
+  const autoplayEligible =
+    reviews.length > 1 && !reducedMotion && !lightboxOpen && !(finePointer && hoverPaused)
+
+  useEffect(() => {
+    if (!autoplayEligible) return
+
+    const id = window.setInterval(() => {
+      const n = storyCountRef.current
+      if (n <= 1) return
+      setStoryIndex((i) => (i + 1) % n)
+    }, REVIEWS_AUTOPLAY_MS)
+
+    return () => window.clearInterval(id)
+  }, [autoplayEligible, autoplayEpoch])
+
   if (!ready || reviews.length === 0) return null
 
   const active = reviews[Math.min(storyIndex, reviews.length - 1)]!
   const paths = reviewImagePaths(active)
   const urls = paths.map((p) => publicTestimonialImageUrl(p)).filter((u): u is string => Boolean(u))
   const alts = urls.map((_, i) => imageAlt(active, i, urls.length))
-
-  function goStory(delta: number) {
-    setStoryIndex((i) => (i + delta + reviews.length) % reviews.length)
-  }
 
   return (
     <section
@@ -523,37 +588,51 @@ export function ReviewsSection() {
           </p>
         </header>
 
-        <article
-          key={`${active.reviewId ?? active.publishedAt ?? storyIndex}-${urls.join('|')}`}
-          className="relative mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center lg:gap-12"
+        <div
+          className="reviews-story-autoplay"
+          data-autoplay={autoplayEligible ? 'on' : 'off'}
+          onMouseEnter={() => {
+            if (finePointer) setHoverPaused(true)
+          }}
+          onMouseLeave={() => {
+            if (!finePointer) return
+            setHoverPaused(false)
+            resetAutoplayTimer()
+          }}
         >
-          {/* RTL: content first → sits at inline-start (right). Stack second → visual gallery on the left. */}
-          <div className="order-2 lg:order-1">
-            <StoryContent review={active} />
-          </div>
+          <article
+            key={`${active.reviewId ?? active.publishedAt ?? storyIndex}-${urls.join('|')}`}
+            className="relative mx-auto grid max-w-5xl gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center lg:gap-12"
+          >
+            {/* RTL: content first → sits at inline-start (right). Stack second → visual gallery on the left. */}
+            <div className="order-2 lg:order-1">
+              <StoryContent review={active} />
+            </div>
 
-          <div className="order-1 lg:order-2">
-            {urls.length > 0 ? (
-              <BounceCardsStack
-                review={active}
-                urls={urls}
-                onOpen={(index) => setLightbox({ urls, index, alts })}
-              />
-            ) : (
-              <div className="mx-auto flex h-[12rem] max-w-sm items-center justify-center rounded-[1.5rem] border border-dashed border-line bg-cream/50 px-6 text-center text-sm text-muted">
-                شهادة مكتوبة بدون صورة
-              </div>
-            )}
-          </div>
-        </article>
+            <div className="order-1 lg:order-2">
+              {urls.length > 0 ? (
+                <BounceCardsStack
+                  review={active}
+                  urls={urls}
+                  onOpen={(index) => setLightbox({ urls, index, alts })}
+                />
+              ) : (
+                <div className="mx-auto flex h-[12rem] max-w-sm items-center justify-center rounded-[1.5rem] border border-dashed border-line bg-cream/50 px-6 text-center text-sm text-muted">
+                  شهادة مكتوبة بدون صورة
+                </div>
+              )}
+            </div>
+          </article>
 
-        <StoryNav
-          index={Math.min(storyIndex, reviews.length - 1)}
-          total={reviews.length}
-          onPrev={() => goStory(-1)}
-          onNext={() => goStory(1)}
-          onSelect={setStoryIndex}
-        />
+          <StoryNav
+            index={Math.min(storyIndex, reviews.length - 1)}
+            total={reviews.length}
+            onPrev={() => goStoryManual(-1)}
+            onNext={() => goStoryManual(1)}
+            onSelect={selectStoryManual}
+            showAutoplayHint={reviews.length > 1 && !reducedMotion}
+          />
+        </div>
       </Container>
 
       {lightbox ? (
@@ -561,7 +640,10 @@ export function ReviewsSection() {
           urls={lightbox.urls}
           index={lightbox.index}
           alts={lightbox.alts}
-          onClose={() => setLightbox(null)}
+          onClose={() => {
+            setLightbox(null)
+            resetAutoplayTimer()
+          }}
           onIndexChange={(next) => setLightbox((prev) => (prev ? { ...prev, index: next } : prev))}
         />
       ) : null}
