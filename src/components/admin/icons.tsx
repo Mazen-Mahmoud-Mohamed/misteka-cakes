@@ -248,6 +248,12 @@ export const IconEye = (p: IconProps) => (
   </Svg>
 )
 
+export const IconMessage = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+  </Svg>
+)
+
 export const IconEyeOff = (p: IconProps) => (
   <Svg {...p}>
     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />

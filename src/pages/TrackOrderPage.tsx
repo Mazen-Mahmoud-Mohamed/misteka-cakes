@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Container } from '@/components/layout/Container'
+import { OrderReviewForm } from '@/components/tracking/OrderReviewForm'
 import { OrderTimeline } from '@/components/tracking/OrderTimeline'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/Field'
@@ -293,6 +294,10 @@ function OrderDetails({
           <OrderTimeline status={order.status} serviceType={order.serviceType} events={order.events} />
         </Panel>
       </div>
+
+      {order.status === 'delivered' ? (
+        <OrderReviewForm phone={phone} orderNumber={order.orderNumber} enabled />
+      ) : null}
 
       {order.canCancel ? (
         <Panel>

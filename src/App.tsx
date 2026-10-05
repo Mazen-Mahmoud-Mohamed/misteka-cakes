@@ -18,6 +18,7 @@ import { AdminSizesPage } from '@/pages/admin/AdminSizesPage'
 import { AdminFillingsPage } from '@/pages/admin/AdminFillingsPage'
 import { AdminExtrasPage } from '@/pages/admin/AdminExtrasPage'
 import { AdminZonesPage } from '@/pages/admin/AdminZonesPage'
+import { AdminReviewsPage } from '@/pages/admin/AdminReviewsPage'
 import { AdminThemePage } from '@/pages/admin/AdminThemePage'
 import { CatalogPage } from '@/pages/CatalogPage'
 import { HomePage } from '@/pages/HomePage'
@@ -95,6 +96,7 @@ function AdminRoutes() {
             <Route path="extras" element={<AdminExtrasPage />} />
             <Route path="zones" element={<AdminZonesPage />} />
             <Route path="theme" element={<AdminThemePage />} />
+            <Route path="reviews" element={<AdminReviewsPage />} />
           </Route>
         </Route>
         <Route path="/admin/*" element={<Navigate to="/admin/login" replace />} />

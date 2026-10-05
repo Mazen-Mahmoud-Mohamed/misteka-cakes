@@ -17,6 +17,7 @@ import {
   IconSparkles,
   IconTag,
   IconEye,
+  IconMessage,
   Spinner,
 } from '@/components/admin/icons'
 import { brand } from '@/data/brand'
@@ -45,6 +46,10 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   {
     label: 'التوصيل',
     items: [{ to: '/admin/zones', label: 'مناطق التوصيل', end: false, icon: <IconMapPin /> }],
+  },
+  {
+    label: 'المحتوى',
+    items: [{ to: '/admin/reviews', label: 'آراء العملاء', end: false, icon: <IconMessage /> }],
   },
   {
     label: 'المظهر',
