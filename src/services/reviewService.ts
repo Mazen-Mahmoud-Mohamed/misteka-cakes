@@ -17,6 +17,7 @@ export const REVIEW_IMAGE_TYPES: Record<string, string> = {
 }
 
 export const REVIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+export const ADMIN_TESTIMONIAL_MAX_IMAGES = 8
 
 const OFFLINE: ReviewServiceFailure = {
   ok: false,
@@ -66,27 +67,62 @@ export function validateCustomerReviewFields(displayName: string, reviewText: st
   return null
 }
 
-/** Public URL for published testimonial media only. */
+export function validateReviewImages(files: File[], max = ADMIN_TESTIMONIAL_MAX_IMAGES): string | null {
+  if (!files.length) return 'أرفقي صورة واحدة على الأقل.'
+  if (files.length > max) return `يمكنك إرفاق ${max} صور كحد أقصى.`
+  for (const file of files) {
+    const err = validateReviewImage(file)
+    if (err) return err
+  }
+  return null
+}
+
+/** Public URL for published testimonial media (flat or nested under review id). */
 export function publicTestimonialImageUrl(imagePath: string | null | undefined): string | null {
   if (!imagePath) return null
-  // Published paths are `{uuid}.{ext}` — never private `{uuid}/photo.{ext}`.
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp)$/i.test(imagePath)) {
-    return null
-  }
+  const flat = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp)$/i
+  const nested =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-z]+\.(jpg|jpeg|png|webp)$/i
+  if (!flat.test(imagePath) && !nested.test(imagePath)) return null
   const base = import.meta.env.VITE_SUPABASE_URL
   if (!base) return null
   return `${base}/storage/v1/object/public/${TESTIMONIALS_BUCKET}/${imagePath}`
 }
 
-function mapPublicRow(row: Record<string, unknown>): PublicReview | null {
+function mapPublicRow(
+  row: Record<string, unknown>,
+  mediaByReview: Map<string, import('@/types/reviews').ReviewMediaItem[]>,
+): PublicReview | null {
   if (!isReviewSource(row.source)) return null
-  const displayName = str(row.display_name).trim()
-  const reviewText = str(row.review_text).trim()
-  if (!displayName || !reviewText) return null
+  const displayName =
+    row.display_name == null || String(row.display_name).trim() === ''
+      ? null
+      : str(row.display_name).trim()
+  const reviewText =
+    row.review_text == null || String(row.review_text).trim() === ''
+      ? null
+      : str(row.review_text).trim()
+  const imagePath = row.image_path == null || row.image_path === '' ? null : str(row.image_path)
+  const reviewId = row.review_id == null ? null : str(row.review_id)
+  const media = reviewId ? (mediaByReview.get(reviewId) ?? []) : []
+
+  if (row.source === 'customer') {
+    if (!displayName || !reviewText) return null
+  } else {
+    const screenshotOnly = !displayName && !reviewText
+    if (screenshotOnly) {
+      if (!imagePath && media.length === 0) return null
+    } else if (!displayName || !reviewText) {
+      return null
+    }
+  }
+
   return {
+    reviewId,
     displayName,
     reviewText,
-    imagePath: row.image_path == null || row.image_path === '' ? null : str(row.image_path),
+    imagePath,
+    media,
     source: row.source,
     publishedAt: row.published_at == null ? null : str(row.published_at),
     sortOrder: Number(row.sort_order) || 0,
@@ -94,7 +130,7 @@ function mapPublicRow(row: Record<string, unknown>): PublicReview | null {
   }
 }
 
-/** Fetch published reviews from the safe public view only. */
+/** Fetch published reviews from the dedicated public-safe table only. */
 export async function fetchPublishedReviews(): Promise<{
   reviews: PublicReview[]
   error: string | null
@@ -103,18 +139,50 @@ export async function fetchPublishedReviews(): Promise<{
   if (!supabase) return { reviews: [], error: null }
 
   try {
-    const { data, error } = await supabase
-      .from('site_reviews_public')
-      .select('display_name, review_text, image_path, source, published_at, sort_order, featured')
-      .order('sort_order', { ascending: true })
-      .order('published_at', { ascending: false })
+    // Prefer join key + media; fall back if migration not applied yet.
+    let reviewRows: Array<Record<string, unknown>> | null = null
 
-    if (error || !data) {
-      return { reviews: [], error: 'تعذّر تحميل آراء العملاء.' }
+    {
+      const withId = await supabase
+        .from('site_reviews_public')
+        .select('review_id, display_name, review_text, image_path, source, published_at, sort_order, featured')
+        .order('sort_order', { ascending: true })
+        .order('published_at', { ascending: false })
+
+      if (!withId.error && withId.data) {
+        reviewRows = withId.data as Array<Record<string, unknown>>
+      } else {
+        const legacy = await supabase
+          .from('site_reviews_public')
+          .select('display_name, review_text, image_path, source, published_at, sort_order, featured')
+          .order('sort_order', { ascending: true })
+          .order('published_at', { ascending: false })
+        if (legacy.error || !legacy.data) {
+          return { reviews: [], error: 'تعذّر تحميل آراء العملاء.' }
+        }
+        reviewRows = legacy.data as Array<Record<string, unknown>>
+      }
     }
 
-    const reviews = (data as Array<Record<string, unknown>>)
-      .map(mapPublicRow)
+    const mediaByReview = new Map<string, import('@/types/reviews').ReviewMediaItem[]>()
+    const mediaRes = await supabase
+      .from('site_review_media_public')
+      .select('review_id, image_path, sort_order')
+      .order('sort_order', { ascending: true })
+
+    if (!mediaRes.error && mediaRes.data) {
+      for (const row of mediaRes.data as Array<Record<string, unknown>>) {
+        const reviewId = str(row.review_id)
+        const imagePath = str(row.image_path)
+        if (!reviewId || !imagePath) continue
+        const list = mediaByReview.get(reviewId) ?? []
+        list.push({ imagePath, sortOrder: Number(row.sort_order) || 0 })
+        mediaByReview.set(reviewId, list)
+      }
+    }
+
+    const reviews = reviewRows
+      .map((row) => mapPublicRow(row, mediaByReview))
       .filter((row): row is PublicReview => row !== null)
 
     return { reviews, error: null }

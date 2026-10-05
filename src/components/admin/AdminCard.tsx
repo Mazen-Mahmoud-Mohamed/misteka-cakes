@@ -7,7 +7,7 @@ export function AdminPage({ children, width = 'wide' }: { children: ReactNode; w
   return (
     <div
       className={cx(
-        'mx-auto w-full px-4 pt-6 pb-16 sm:px-6 lg:px-8 lg:pt-8',
+        'mx-auto w-full px-4 pt-5 pb-12 sm:px-6 lg:px-8 lg:pt-6',
         width === 'wide' ? 'max-w-7xl' : 'max-w-5xl',
       )}
     >
@@ -28,11 +28,11 @@ export function AdminPageHeader({
   meta?: ReactNode
 }) {
   return (
-    <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        {meta ? <div className="mb-1.5">{meta}</div> : null}
+        {meta ? <div className="mb-1">{meta}</div> : null}
         <h1 className="text-2xl leading-tight font-bold text-ink sm:text-[1.75rem]">{title}</h1>
-        {description ? <p className="mt-1.5 max-w-2xl text-sm leading-7 text-muted">{description}</p> : null}
+        {description ? <p className="mt-1 max-w-2xl text-sm leading-7 text-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </header>

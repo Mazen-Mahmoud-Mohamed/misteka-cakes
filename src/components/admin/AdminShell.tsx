@@ -86,11 +86,11 @@ function Brand() {
 
 function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <nav aria-label="أقسام لوحة التحكم" className="grid gap-5">
+    <nav aria-label="أقسام لوحة التحكم" className="grid gap-4">
       {navGroups.map((group, index) => (
         <div key={group.label ?? index}>
           {group.label ? (
-            <p className="mb-1.5 px-3 text-[0.6875rem] font-bold tracking-wide text-muted/80">{group.label}</p>
+            <p className="mb-1 px-3 text-[0.6875rem] font-bold tracking-wide text-muted/80">{group.label}</p>
           ) : null}
           <ul className="grid gap-0.5">
             {group.items.map((item) => (

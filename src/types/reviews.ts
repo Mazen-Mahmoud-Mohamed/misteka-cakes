@@ -6,14 +6,32 @@ export type ReviewSource = (typeof REVIEW_SOURCES)[number]
 export const REVIEW_STATUSES = ['pending', 'published', 'rejected'] as const
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number]
 
-export const ADMIN_TESTIMONIAL_SOURCES = ['whatsapp', 'facebook', 'instagram', 'manual'] as const
-export type AdminTestimonialSource = (typeof ADMIN_TESTIMONIAL_SOURCES)[number]
+/** Admin screenshot sources only — no free-text / manual writing in the form. */
+export const ADMIN_SCREENSHOT_SOURCES = ['whatsapp', 'facebook', 'instagram'] as const
+export type AdminScreenshotSource = (typeof ADMIN_SCREENSHOT_SOURCES)[number]
 
-/** Columns from public.site_reviews_public — never includes order/admin metadata. */
+/** @deprecated Use ADMIN_SCREENSHOT_SOURCES */
+export const ADMIN_TESTIMONIAL_SOURCES = ADMIN_SCREENSHOT_SOURCES
+export type AdminTestimonialSource = AdminScreenshotSource
+
+/** Max images per admin screenshot testimonial. */
+export const ADMIN_TESTIMONIAL_MAX_IMAGES = 8
+
+export interface ReviewMediaItem {
+  imagePath: string
+  sortOrder: number
+}
+
+/** Columns from public.site_reviews_public (+ joined public media). */
 export interface PublicReview {
-  displayName: string
-  reviewText: string
+  /** Opaque public join key (site_reviews.id) — not order/customer PII. */
+  reviewId: string | null
+  displayName: string | null
+  reviewText: string | null
+  /** Legacy/primary image path (first media or customer photo). */
   imagePath: string | null
+  /** Ordered gallery; never duplicates primary unnecessarily in UI. */
+  media: ReviewMediaItem[]
   source: ReviewSource
   publishedAt: string | null
   sortOrder: number
@@ -26,9 +44,10 @@ export interface AdminReview {
   orderId: string | null
   orderNumber: string | null
   source: ReviewSource
-  displayName: string
-  reviewText: string
+  displayName: string | null
+  reviewText: string | null
   imagePath: string | null
+  media: ReviewMediaItem[]
   status: ReviewStatus
   sortOrder: number
   featured: boolean
@@ -47,7 +66,6 @@ export interface SubmitCustomerReviewInput {
   orderNumber: string
   displayName: string
   reviewText: string
-  /** Optional single image — validated client-side then uploaded via secure path. */
   image?: File | null
 }
 
@@ -65,8 +83,43 @@ export function isReviewStatus(value: unknown): value is ReviewStatus {
   return typeof value === 'string' && (REVIEW_STATUSES as readonly string[]).includes(value)
 }
 
+export function isAdminScreenshotSource(value: unknown): value is AdminScreenshotSource {
+  return typeof value === 'string' && (ADMIN_SCREENSHOT_SOURCES as readonly string[]).includes(value)
+}
+
+/** @deprecated Use isAdminScreenshotSource */
 export function isAdminTestimonialSource(value: unknown): value is AdminTestimonialSource {
-  return typeof value === 'string' && (ADMIN_TESTIMONIAL_SOURCES as readonly string[]).includes(value)
+  return isAdminScreenshotSource(value)
+}
+
+/** Ordered image paths for a review (media table first, else legacy image_path). */
+export function reviewImagePaths(review: {
+  imagePath?: string | null
+  media?: ReviewMediaItem[]
+}): string[] {
+  const fromMedia = (review.media ?? [])
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((m) => m.imagePath)
+    .filter(Boolean)
+  if (fromMedia.length) return fromMedia
+  return review.imagePath ? [review.imagePath] : []
+}
+
+/** Screenshot-only admin testimonial (image(s) are the content — no name/text). */
+export function isScreenshotTestimonial(review: {
+  source: ReviewSource
+  displayName: string | null
+  reviewText: string | null
+  imagePath?: string | null
+  media?: ReviewMediaItem[]
+}): boolean {
+  return (
+    review.source !== 'customer' &&
+    (review.displayName == null || review.displayName === '') &&
+    (review.reviewText == null || review.reviewText === '') &&
+    reviewImagePaths(review).length > 0
+  )
 }
 
 /** Honest Arabic source labels — never claim website verification for admin imports. */
@@ -94,4 +147,11 @@ export function reviewStatusLabel(status: ReviewStatus): string {
     case 'rejected':
       return 'مرفوضة'
   }
+}
+
+export function arabicImageCountLabel(count: number): string {
+  if (count === 1) return 'صورة واحدة'
+  if (count === 2) return 'صورتان'
+  if (count >= 3 && count <= 10) return `${count} صور`
+  return `${count} صورة`
 }

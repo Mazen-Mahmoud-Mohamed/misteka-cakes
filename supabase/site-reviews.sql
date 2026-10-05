@@ -70,30 +70,13 @@ create trigger site_reviews_set_updated_at
   execute function public.set_site_reviews_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Safe public view (columns only — never expose order/admin metadata)
+-- Public read layer lives in supabase/site-reviews-public-table.sql
+-- (dedicated public-safe TABLE — not a SECURITY DEFINER view).
+-- Do not recreate site_reviews_public as a view here.
 -- ---------------------------------------------------------------------------
 
--- security_invoker = false: view owner bypasses RLS so anon can read ONLY these
--- columns. Anon has no SELECT grant/policy on the base table (column safety).
-create or replace view public.site_reviews_public
-with (security_invoker = false)
-as
-select
-  display_name,
-  review_text,
-  image_path,
-  source,
-  published_at,
-  sort_order,
-  featured
-from public.site_reviews
-where status = 'published';
-
-revoke all on table public.site_reviews_public from anon, authenticated;
-grant select on table public.site_reviews_public to anon, authenticated;
-
 -- ---------------------------------------------------------------------------
--- RLS on site_reviews (no anon SELECT — public reads go through the view only)
+-- RLS on site_reviews (no anon SELECT — public reads go through site_reviews_public table)
 -- ---------------------------------------------------------------------------
 
 drop policy if exists "public_select_published_site_reviews" on public.site_reviews;
