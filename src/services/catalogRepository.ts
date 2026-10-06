@@ -19,6 +19,59 @@ import type {
   ProductPriceTierKind,
   ProductPricingMode,
 } from '@/types/products'
+import { pricingNotes } from '@/data/pricing'
+import { deriveDefaultPricingSections } from '@/services/pricingContent'
+import type { PricingContentSection, PricingItemKind, PricingSectionWidth } from '@/types/pricing'
+
+interface PricingSectionRow {
+  id: string
+  title: string
+  description: string
+  width: PricingSectionWidth
+  sort_order: number
+}
+
+interface PricingItemRow {
+  id: string
+  section_id: string
+  item_kind: PricingItemKind
+  label: string
+  sublabel: string
+  price: number | string | null
+  unit: string
+  note: string
+  cake_size_id: string | null
+  product_id: string | null
+  price_tier_id: string | null
+  sort_order: number
+}
+
+function mapPricingSections(sections: PricingSectionRow[], items: PricingItemRow[]): PricingContentSection[] {
+  return sections.map((section) => ({
+    id: section.id,
+    title: section.title,
+    description: section.description ?? '',
+    width: section.width === 'half' ? 'half' : 'full',
+    sortOrder: section.sort_order,
+    items: items
+      .filter((item) => item.section_id === section.id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((item) => ({
+        id: item.id,
+        sectionId: item.section_id,
+        kind: item.item_kind,
+        label: item.label ?? '',
+        sublabel: item.sublabel ?? '',
+        price: item.price == null ? null : Number(item.price),
+        unit: item.unit ?? '',
+        note: item.note ?? '',
+        cakeSizeId: item.cake_size_id,
+        productId: item.product_id,
+        priceTierId: item.price_tier_id,
+        sortOrder: item.sort_order,
+      })),
+  }))
+}
 
 interface CakeSizeRow {
   id: string
@@ -524,6 +577,8 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     optionDefValuesRes,
     optionLinksRes,
     optionOverridesRes,
+    pricingSectionsRes,
+    pricingItemsRes,
   ] = await Promise.all([
     supabase.from('cake_sizes').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('cakes').select('*').eq('enabled', true).order('sort_order'),
@@ -543,6 +598,8 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     supabase.from('option_definition_values').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('product_option_links').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('product_option_link_value_overrides').select('*'),
+    supabase.from('pricing_sections').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('pricing_items').select('*').eq('enabled', true).order('sort_order'),
   ])
 
   // Sizes are the source of truth for /pricing — fail closed if they do not load.
@@ -694,6 +751,15 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
       ? mapOffers((offersRes.data ?? []) as OfferRow[], componentsByOffer)
       : local.offers
 
+  // Before supabase/pricing-content.sql is applied the tables are missing; derive the same default layout.
+  const pricingSections =
+    pricingSectionsRes.error || pricingItemsRes.error
+      ? deriveDefaultPricingSections({ sizes, products, productCategories, notes: pricingNotes })
+      : mapPricingSections(
+          (pricingSectionsRes.data ?? []) as PricingSectionRow[],
+          (pricingItemsRes.data ?? []) as PricingItemRow[],
+        )
+
   return {
     ok: true,
     bundle: {
@@ -706,7 +772,7 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
       fillings,
       extras,
       zones,
-      pricingNotes: local.pricingNotes,
+      pricingSections,
       deliveryFee: local.deliveryFee,
       deliveryNote: local.deliveryNote,
     },

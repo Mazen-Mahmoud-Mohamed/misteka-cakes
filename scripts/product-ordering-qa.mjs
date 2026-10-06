@@ -48,7 +48,12 @@ check('product_config_step', productConfig.includes('showPackagePicker') && prod
 check('wizard_skips_cake_ui', orderWizard.includes('ProductConfigStep') && orderWizard.includes('isCakeOrdering'))
 check('basic_info_servings_gated', basicInfo.includes('isCakeOrdering') && basicInfo.includes('needsServings'))
 check('cake_details_uses_ordering', cakeDetails.includes('isCakeOrdering'))
-check('pricing_page_dynamic_tiers', pricing.includes('priceTiers') && pricing.includes('isCakeOrdering'))
+check(
+  'pricing_page_dynamic_tiers',
+  pricing.includes('resolvePricingItem') &&
+    read('src', 'services', 'pricingContent.ts').includes('priceTiers') &&
+    read('src', 'services', 'pricingContent.ts').includes('isCakeOrdering'),
+)
 check('admin_ordering_ui', adminProducts.includes('طريقة البيع') && adminProducts.includes('PriceTierSection'))
 check('admin_option_links', adminProducts.includes('OptionLinkSection') && adminProducts.includes('/admin/options'))
 check('admin_options_library_page', adminOptions.includes('مكتبة الخيارات') && adminOptions.includes('option_definitions') === false && adminOptions.includes('listAdminOptionDefinitions'))

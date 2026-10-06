@@ -1,17 +1,10 @@
 import { Container } from '@/components/layout/Container'
-import { PriceList } from '@/components/pricing/PriceList'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { content } from '@/data/content'
 import { useCatalog } from '@/providers/CatalogProvider'
-import {
-  getBasicPricing,
-  getPricingNotes,
-  listChildProductCategories,
-  listProductsInCategory,
-  listTopProductCategories,
-} from '@/services/catalogService'
-import { isCakeOrdering, isQuoteOrdering, type Product } from '@/types/products'
-import { formatEgp } from '@/utils/format'
+import { listPricingSections, listProducts, listSizes } from '@/services/catalogService'
+import { resolvePricingItem, type ResolvedPricingRow } from '@/services/pricingContent'
+import { cx } from '@/utils/cx'
 
 function PricingSkeleton() {
   return (
@@ -66,71 +59,78 @@ function PricingMessage({
   )
 }
 
-function productPriceRows(product: Product): Array<{ id: string; label: string; price: string }> {
-  if (isQuoteOrdering(product)) {
-    return [{ id: `${product.id}-quote`, label: product.name, price: 'اطلب السعر' }]
-  }
-  if (isCakeOrdering(product)) return []
-  const packages = product.priceTiers.filter((t) => t.tierKind === 'package' && t.enabled)
-  if (packages.length) {
-    return packages.map((t) => ({
-      id: t.id,
-      label: `${product.name} — ${t.label}`,
-      price: formatEgp(t.price),
-    }))
-  }
-  const weights = product.priceTiers.filter((t) => t.tierKind === 'weight' && t.enabled)
-  if (weights.length) {
-    return weights.map((t) => ({
-      id: t.id,
-      label: `${product.name} — ${t.label}`,
-      price: formatEgp(t.price),
-    }))
-  }
-  const ranges = product.priceTiers.filter((t) => t.tierKind === 'quantity_range' && t.enabled)
-  if (ranges.length) {
-    return ranges.map((t) => ({
-      id: t.id,
-      label: `${product.name} — ${t.label}`,
-      price: `${formatEgp(t.price)} / قطعة`,
-    }))
-  }
-  if (product.fixedPrice != null) {
-    return [
-      {
-        id: product.id,
-        label:
-          product.orderingModel === 'quantity'
-            ? `${product.name} — للقطعة`
-            : product.name,
-        price: formatEgp(product.fixedPrice),
-      },
-    ]
-  }
-  return []
+type ResolvedSection = {
+  id: string
+  title: string
+  description: string
+  width: 'full' | 'half'
+  rows: ResolvedPricingRow[]
+}
+
+function PricingCard({ section }: { section: ResolvedSection }) {
+  const priced = section.rows.filter((row) => row.type === 'row')
+  const notes = section.rows.filter((row) => row.type === 'note')
+  const texts = section.rows.filter((row) => row.type === 'text')
+  return (
+    <div
+      className={cx(
+        'min-w-0 rounded-3xl border border-line/80 bg-paper px-5 py-7 sm:px-10 sm:py-10',
+        section.width === 'full' && 'lg:col-span-2',
+      )}
+    >
+      <h3 className="font-display text-2xl text-rose-deep sm:text-3xl">{section.title}</h3>
+      {section.description ? <p className="mt-2 text-sm leading-7 text-muted">{section.description}</p> : null}
+      {texts.map((row) => (
+        <p key={row.id} className="mt-4 text-sm leading-7 whitespace-pre-line text-ink sm:text-base">
+          {row.type === 'text' ? row.text : null}
+        </p>
+      ))}
+      {priced.length ? (
+        <ul className="mt-5 divide-y divide-line/80 border-t border-line/80">
+          {priced.map((row) =>
+            row.type === 'row' ? (
+              <li key={row.id} className="flex items-start justify-between gap-4 py-3.5">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink sm:text-base">{row.label}</span>
+                  {row.sublabel ? <span className="block text-xs text-muted sm:text-sm">{row.sublabel}</span> : null}
+                  {row.note ? <span className="mt-0.5 block text-xs leading-6 text-muted">{row.note}</span> : null}
+                </span>
+                <span className="shrink-0 text-sm font-semibold text-rose-deep sm:text-base">{row.price}</span>
+              </li>
+            ) : null,
+          )}
+        </ul>
+      ) : null}
+      {notes.length ? (
+        <ul className="mt-4 grid gap-2 text-sm leading-7 text-muted">
+          {notes.map((row) => (
+            <li key={row.id} className="flex gap-3">
+              <span className="mt-3 size-1.5 shrink-0 rounded-full bg-gold" aria-hidden="true" />
+              <span>{row.type === 'note' ? row.text : null}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
 }
 
 export function PricingSection({ headingAs = 'h2' }: { headingAs?: 'h1' | 'h2' }) {
   const { status, error, version, reload } = useCatalog()
   void version
-  const pricing = getBasicPricing()
-  const notes = getPricingNotes()
-  const roots = listTopProductCategories().filter((c) => c.kind !== 'offers')
-  const catalogSections = roots
-    .map((root) => {
-      const subs = listChildProductCategories(root.id)
-      const products =
-        subs.length > 0
-          ? subs.flatMap((sub) => listProductsInCategory(sub.id, 'all'))
-          : listProductsInCategory(root.id, 'all')
-      const nonCake = products.filter((p) => !isCakeOrdering(p))
-      const rows = nonCake.flatMap(productPriceRows)
-      return { root, rows }
-    })
+  const sources = { sizes: listSizes(), products: listProducts() }
+  const sections: ResolvedSection[] = listPricingSections()
+    .map((section) => ({
+      id: section.id,
+      title: section.title,
+      description: section.description,
+      width: section.width,
+      rows: section.items
+        .map((item) => resolvePricingItem(item, sources))
+        .filter((row): row is ResolvedPricingRow => row !== null),
+    }))
     .filter((section) => section.rows.length > 0)
-
-  const hasCakePricing = pricing.single.length > 0 || pricing.twoTier.length > 0
-  const isEmpty = !hasCakePricing && catalogSections.length === 0
+  const isEmpty = sections.length === 0
 
   return (
     <section id="pricing" className="scroll-mt-24 bg-cream/60 py-16 sm:py-24">
@@ -159,59 +159,14 @@ export function PricingSection({ headingAs = 'h2' }: { headingAs?: 'h1' | 'h2' }
         ) : null}
 
         {status === 'ready' && isEmpty ? (
-          <PricingMessage title="لا توجد أسعار معروضة" body="لا توجد منتجات أو مقاسات مفعّلة حاليًا." />
+          <PricingMessage title="لا توجد أسعار معروضة" body="لا توجد أسعار معروضة حاليًا. تواصلي معنا لمعرفة الأسعار." />
         ) : null}
 
         {status === 'ready' && !isEmpty ? (
-          <div className="mx-auto grid max-w-5xl gap-8">
-            {hasCakePricing ? (
-              <div className="rounded-3xl border border-line/80 bg-paper px-5 py-7 sm:px-10 sm:py-10">
-                <h3 className="font-display text-3xl text-rose-deep">التورت</h3>
-                <div className="mt-6 grid gap-10 lg:grid-cols-2 lg:gap-0">
-                  {pricing.single.length ? (
-                    <div className="lg:pe-10">
-                      <PriceList title={content.pricing.singleTitle} sizes={pricing.single} />
-                    </div>
-                  ) : null}
-                  {pricing.twoTier.length ? (
-                    <div className={pricing.single.length ? 'lg:border-s lg:border-line/80 lg:ps-10' : undefined}>
-                      <PriceList
-                        title={content.pricing.twoTierTitle}
-                        note="عدد الأفراد تقريبي، كما في قائمة الأسعار."
-                        sizes={pricing.twoTier}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {catalogSections.map((section) => (
-              <div key={section.root.id} className="rounded-3xl border border-line/80 bg-paper px-5 py-7 sm:px-10 sm:py-10">
-                <h3 className="font-display text-3xl text-rose-deep">{section.root.name}</h3>
-                <ul className="mt-5 divide-y divide-line/80 border-t border-line/80">
-                  {section.rows.map((row) => (
-                    <li key={row.id} className="flex items-start justify-between gap-4 py-3.5">
-                      <span className="text-sm font-semibold text-ink sm:text-base">{row.label}</span>
-                      <span className="shrink-0 font-latin text-sm font-semibold text-rose-deep sm:text-base">
-                        {row.price}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2 lg:gap-8">
+            {sections.map((section) => (
+              <PricingCard key={section.id} section={section} />
             ))}
-
-            {notes.length ? (
-              <ul className="mx-auto grid max-w-3xl gap-2 text-sm leading-7 text-muted">
-                {notes.map((note) => (
-                  <li key={note} className="flex gap-3">
-                    <span className="mt-3 size-1.5 shrink-0 rounded-full bg-gold" aria-hidden="true" />
-                    <span>{note}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </div>
         ) : null}
       </Container>

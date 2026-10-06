@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { resolveCakeImage } from '@/data/localCatalog'
 import { AdminAlert } from '@/components/admin/AdminAlert'
 import { AdminBadge, EnabledBadge } from '@/components/admin/AdminBadge'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
 import {
+  AdminCheckboxTile,
+  AdminSelect,
   AdminSelectField,
   AdminSwitch,
   AdminTextAreaField,
@@ -24,9 +26,24 @@ import {
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
 import { IconCake, IconImage, IconPlus, IconRefresh } from '@/components/admin/icons'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  listAdminCakes,
+  listAdminExtras,
+  listAdminFillings,
+  listAdminSizes,
+  type AdminCakeRow,
+  type AdminCakeSizeRow,
+  type AdminExtraRow,
+  type AdminFillingRow,
+} from '@/services/admin/adminCatalogService'
+import { listAllAdminPriceTiers } from '@/services/admin/adminPricingService'
 import {
   deleteAdminProduct,
+  getAdminCakeConfig,
+  listAdminProductIdsWithOrders,
+  upsertAdminCakeProduct,
+  type AdminCakeConfig,
   deleteAdminProductOptionLink,
   deleteAdminProductPriceTier,
   deleteCatalogMedia,
@@ -57,12 +74,6 @@ const ORDERING_LABELS: Record<ProductOrderingModel, string> = {
   weight: 'بالوزن',
   quote: 'اطلب السعر',
   custom: 'مخصص',
-}
-
-const PRICING_LABELS: Record<ProductPricingMode, string> = {
-  cake_sizes: 'حسب مقاس التورت',
-  fixed: 'سعر ثابت',
-  quote: 'عند التأكيد',
 }
 
 const TIER_KIND_LABELS: Record<ProductPriceTierKind, string> = {
@@ -240,11 +251,6 @@ function categoryPath(categories: AdminProductCategoryRow[], id: string): string
   return parts.join(' › ') || id
 }
 
-function leafCategoryIds(categories: AdminProductCategoryRow[]): Set<string> {
-  const parents = new Set(categories.map((c) => c.parent_id).filter(Boolean) as string[])
-  return new Set(categories.filter((c) => c.kind !== 'offers' && !parents.has(c.id)).map((c) => c.id))
-}
-
 function PriceTierSection({
   productId,
   orderingModel,
@@ -342,7 +348,7 @@ function PriceTierSection({
   return (
     <section className="grid gap-4 border-t border-line pt-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-ink">شرائح التسعير</h3>
+        <h3 className="text-sm font-bold text-ink">الباكدجات وشرائح السعر</h3>
         <div className="flex flex-wrap gap-2">
           {showPackages ? (
             <AdminButton
@@ -556,7 +562,7 @@ function OptionLinkSection({
     return (
       <section className="grid gap-2 border-t border-line pt-5">
         <h3 className="text-sm font-bold text-ink">الخيارات</h3>
-        <AdminAlert tone="info">خيارات مقاسات وحشوات التورت تُدار من صفحة التورت.</AdminAlert>
+        <AdminAlert tone="info">مقاسات وحشوات وإضافات التورتة تُختار من «إعدادات التورتة» أعلاه.</AdminAlert>
       </section>
     )
   }
@@ -746,44 +752,250 @@ function OptionLinkSection({
   )
 }
 
+function toggleId(list: string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id]
+}
+
+function OptionGroup({
+  legend,
+  selected,
+  total,
+  error,
+  children,
+}: {
+  legend: string
+  selected: number
+  total: number
+  error?: string
+  children: ReactNode
+}) {
+  return (
+    <fieldset className="grid gap-2">
+      <legend className="mb-2 flex w-full items-center justify-between gap-2 text-sm font-bold text-ink">
+        {legend}
+        <span className="text-xs font-semibold text-muted">
+          {selected} من {total} محدد
+        </span>
+      </legend>
+      {children}
+      {error ? (
+        <p className="text-[0.8125rem] font-semibold text-[#8a2e2e]" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </fieldset>
+  )
+}
+
+function CakeConfigSection({
+  config,
+  onChange,
+  sizes,
+  fillings,
+  extras,
+  error,
+}: {
+  config: AdminCakeConfig
+  onChange: (patch: Partial<AdminCakeConfig>) => void
+  sizes: AdminCakeSizeRow[]
+  fillings: AdminFillingRow[]
+  extras: AdminExtraRow[]
+  error?: string
+}) {
+  const groups = [
+    { group: 'single', label: 'دور واحد', items: sizes.filter((s) => s.pricing_group === 'single') },
+    { group: 'two-tier', label: 'دورين', items: sizes.filter((s) => s.pricing_group === 'two-tier') },
+  ]
+  return (
+    <section aria-labelledby="product-cake" className="grid gap-5 border-t border-line pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id="product-cake" className="text-sm font-bold text-ink">
+          إعدادات التورتة
+        </h3>
+        <Link to="/admin/sizes" className="text-[0.8125rem] font-semibold text-rose-deep underline-offset-4 hover:underline">
+          تعديل المقاسات والأسعار
+        </Link>
+      </div>
+      <p className="text-[0.8125rem] leading-6 text-muted">
+        السعر يُحسب تلقائيًا من المقاس الذي يختاره العميل. اختاري المقاسات والحشوات والإضافات المتاحة لهذه التورتة.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <AdminSelectField
+          id="cake-structure"
+          label="الشكل الافتراضي"
+          value={config.pricing_group}
+          onChange={(e) => onChange({ pricing_group: e.target.value as AdminCakeConfig['pricing_group'] })}
+        >
+          <option value="single">دور واحد</option>
+          <option value="two-tier">دورين</option>
+        </AdminSelectField>
+        <AdminTextField
+          id="cake-serving-info"
+          label="معلومة عن عدد الأفراد"
+          hint="اختياري. مثال: مناسبة لـ 10 إلى 15 فرد."
+          value={config.serving_info}
+          onChange={(e) => onChange({ serving_info: e.target.value })}
+        />
+      </div>
+
+      <OptionGroup legend="المقاسات" selected={config.available_size_ids.length} total={sizes.length} error={error}>
+        {groups.map(({ group, label, items }) =>
+          items.length ? (
+            <div key={group} className="grid gap-2">
+              <p className="text-xs font-semibold text-muted">{label}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {items.map((size) => (
+                  <AdminCheckboxTile
+                    key={size.id}
+                    checked={config.available_size_ids.includes(size.id)}
+                    onChange={() => onChange({ available_size_ids: toggleId(config.available_size_ids, size.id) })}
+                    hint={size.enabled ? formatEgp(size.price) : 'غير مفعّل'}
+                  >
+                    {size.label}
+                  </AdminCheckboxTile>
+                ))}
+              </div>
+            </div>
+          ) : null,
+        )}
+      </OptionGroup>
+
+      <OptionGroup legend="الحشوات" selected={config.filling_ids.length} total={fillings.length}>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {fillings.map((item) => (
+            <AdminCheckboxTile
+              key={item.id}
+              checked={config.filling_ids.includes(item.id)}
+              onChange={() => onChange({ filling_ids: toggleId(config.filling_ids, item.id) })}
+              hint={item.enabled ? undefined : 'غير مفعّل'}
+            >
+              {item.name}
+            </AdminCheckboxTile>
+          ))}
+        </div>
+      </OptionGroup>
+
+      <OptionGroup legend="الإضافات والتصميم" selected={config.extra_ids.length} total={extras.length}>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {extras.map((item) => (
+            <AdminCheckboxTile
+              key={item.id}
+              checked={config.extra_ids.includes(item.id)}
+              onChange={() => onChange({ extra_ids: toggleId(config.extra_ids, item.id) })}
+              hint={item.enabled ? undefined : 'غير مفعّل'}
+            >
+              {item.name}
+            </AdminCheckboxTile>
+          ))}
+        </div>
+      </OptionGroup>
+    </section>
+  )
+}
+
+type PriceSummary = { text: string; tone: 'info' | 'pending' | 'danger' }
+
+const CAKES_ROOT = 'cat-cakes'
+
 export function AdminProductsPage() {
   usePageTitle('المنتجات | مستكة')
+  const [searchParams, setSearchParams] = useSearchParams()
   const [categories, setCategories] = useState<AdminProductCategoryRow[]>([])
+  const [sizes, setSizes] = useState<AdminCakeSizeRow[]>([])
+  const [fillings, setFillings] = useState<AdminFillingRow[]>([])
+  const [extras, setExtras] = useState<AdminExtraRow[]>([])
+  const [cakes, setCakes] = useState<AdminCakeRow[]>([])
+  const [tiers, setTiers] = useState<Array<{ product_id: string; price: number; enabled: boolean }>>([])
+  const [cakeConfig, setCakeConfig] = useState<AdminCakeConfig | null>(null)
+  const [cakeConfigError, setCakeConfigError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [modelFilter, setModelFilter] = useState<ProductOrderingModel | 'all'>('all')
+  const [withHistory, setWithHistory] = useState<Set<string> | null>(null)
   const sessionUploads = useRef(new Set<string>())
   const productIds = useRef<string[]>([])
   const nextSort = useRef(10)
+  const cakeConfigRef = useRef<AdminCakeConfig | null>(null)
+  cakeConfigRef.current = cakeConfig
+
+  const topFilter = searchParams.get('category') ?? 'all'
+  const subFilter = searchParams.get('sub') ?? 'all'
+
+  function setCategoryFilter(top: string, sub = 'all') {
+    const next = new URLSearchParams(searchParams)
+    if (top === 'all') next.delete('category')
+    else next.set('category', top)
+    if (sub === 'all') next.delete('sub')
+    else next.set('sub', sub)
+    setSearchParams(next, { replace: true })
+  }
 
   function resetSession() {
     setUploading(false)
     setDeleteError('')
+    setCakeConfig(null)
+    setCakeConfigError('')
+  }
+
+  function defaultCakeConfig(): AdminCakeConfig {
+    return {
+      pricing_group: 'single',
+      serving_info: '',
+      available_size_ids: sizes.filter((s) => s.enabled).map((s) => s.id),
+      filling_ids: fillings.filter((f) => f.enabled).map((f) => f.id),
+      extra_ids: extras.filter((e) => e.enabled).map((e) => e.id),
+      base_price: null,
+      image_position: 'center',
+    }
   }
 
   const crud = useCatalogCrud<AdminProductRow>({
     list: async () => {
-      const [productsRes, categoriesRes] = await Promise.all([listAdminProducts(), listAdminProductCategories()])
+      const [productsRes, categoriesRes, sizesRes, fillingsRes, extrasRes, cakesRes, tiersRes, historyRes] = await Promise.all([
+        listAdminProducts(),
+        listAdminProductCategories(),
+        listAdminSizes(),
+        listAdminFillings(),
+        listAdminExtras(),
+        listAdminCakes(),
+        listAllAdminPriceTiers(),
+        listAdminProductIdsWithOrders(),
+      ])
+      setWithHistory(historyRes.data)
       setCategories(categoriesRes.data ?? [])
-      productIds.current = (productsRes.data ?? []).map((row) => row.id)
+      setSizes(sizesRes.data ?? [])
+      setFillings(fillingsRes.data ?? [])
+      setExtras(extrasRes.data ?? [])
+      setCakes(cakesRes.data ?? [])
+      setTiers(tiersRes.data ?? [])
+      productIds.current = [
+        ...(productsRes.data ?? []).map((row) => row.id),
+        ...(cakesRes.data ?? []).map((row) => row.id),
+      ]
       nextSort.current = Math.max(0, ...(productsRes.data ?? []).map((row) => row.sort_order), 0) + 10
       return productsRes
     },
-    upsert: upsertAdminProduct,
+    upsert: (row) =>
+      row.ordering_model === 'cake_servings'
+        ? upsertAdminCakeProduct(row, cakeConfigRef.current ?? defaultCakeConfig())
+        : upsertAdminProduct(row),
     prepare: (draft) => {
       const isCake = Boolean(draft.legacy_cake_id) || draft.ordering_model === 'cake_servings'
       const ordering = (isCake ? 'cake_servings' : draft.ordering_model || 'fixed_item') as ProductOrderingModel
       const pricing = pricingModeFromOrdering(ordering)
+      const id = draft.id || generateId(draft.name, 'product', productIds.current)
       return {
         ...draft,
-        id: draft.id || generateId(draft.name, 'product', productIds.current),
+        id,
         name: draft.name.trim(),
         description: draft.description.trim(),
         price_note: draft.price_note.trim(),
         image_alt: draft.image_alt.trim(),
         ordering_model: ordering,
         pricing_mode: pricing,
+        legacy_cake_id: isCake ? draft.legacy_cake_id || id : null,
         qty_min: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_min) || 1 : null,
         qty_max: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_max) || 99 : null,
         qty_step: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_step) || 1 : null,
@@ -799,11 +1011,16 @@ export function AdminProductsPage() {
       }
     },
     validate: (draft) => {
-      const isCake = Boolean(draft.legacy_cake_id)
+      const isCake = Boolean(draft.legacy_cake_id) || draft.ordering_model === 'cake_servings'
       const ordering = (draft.ordering_model || 'fixed_item') as ProductOrderingModel
-      return {
+      const parentId = categories.find((c) => c.id === draft.category_id)?.parent_id
+      const errors = {
         name: draft.name.trim() ? undefined : 'أدخلي اسم المنتج.',
-        category_id: draft.category_id ? undefined : 'اختاري التصنيف.',
+        category_id: !draft.category_id
+          ? 'اختاري التصنيف.'
+          : isCake && parentId !== CAKES_ROOT
+            ? 'التورت تحتاج تصنيفًا فرعيًا تحت «التورت».'
+            : undefined,
         fixed_price:
           !isCake &&
           ordering === 'fixed_item' &&
@@ -811,9 +1028,15 @@ export function AdminProductsPage() {
             ? 'أدخلي السعر الثابت.'
             : undefined,
         image_key: uploading ? 'انتظري حتى يكتمل رفع الصورة.' : undefined,
-        ordering_model:
-          !isCake && ordering === 'cake_servings' ? 'هذا النمط متاح فقط للمنتجات المرتبطة بالتورت.' : undefined,
       }
+      const sizeError =
+        isCake && cakeConfigRef.current && cakeConfigRef.current.available_size_ids.length === 0
+          ? 'اختاري مقاسًا واحدًا على الأقل.'
+          : isCake && !cakeConfigRef.current
+            ? 'انتظري تحميل إعدادات التورتة.'
+            : ''
+      setCakeConfigError(sizeError)
+      return { ...errors, cake_config: sizeError || undefined }
     },
     onSaved: async (saved, previous) => {
       const stale = [...sessionUploads.current].filter((path) => path !== saved.image_key)
@@ -830,34 +1053,71 @@ export function AdminProductsPage() {
     },
   })
 
-  const filter = useCatalogFilter(crud.rows, (row) => [
-    row.name,
-    row.description,
-    categoryPath(categories, row.category_id),
-    ORDERING_LABELS[row.ordering_model ?? 'fixed_item'],
-    PRICING_LABELS[row.pricing_mode],
-  ])
+  const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
+  const topCategories = useMemo(
+    () =>
+      categories
+        .filter((c) => c.parent_id === null && c.kind !== 'offers')
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar')),
+    [categories],
+  )
+  const childrenOf = (parentId: string) =>
+    categories
+      .filter((c) => c.parent_id === parentId && c.kind !== 'offers')
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar'))
+  const rootOf = (categoryId: string) => {
+    const category = byId.get(categoryId)
+    return category?.parent_id ?? category?.id ?? ''
+  }
 
-  const leaves = leafCategoryIds(categories)
-  const categoryChoices = [...categories]
-    .filter((c) => c.kind !== 'offers')
-    .sort((a, b) => {
-      const aLeaf = leaves.has(a.id) ? 0 : 1
-      const bLeaf = leaves.has(b.id) ? 0 : 1
-      if (aLeaf !== bLeaf) return aLeaf - bLeaf
-      return a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar')
-    })
+  const scopedRows = crud.rows.filter((row) => {
+    if (topFilter !== 'all' && rootOf(row.category_id) !== topFilter) return false
+    if (subFilter !== 'all' && row.category_id !== subFilter) return false
+    if (modelFilter !== 'all' && (row.ordering_model ?? 'fixed_item') !== modelFilter) return false
+    return true
+  })
+
+  const filter = useCatalogFilter(scopedRows, (row) => [row.name, row.description, categoryPath(categories, row.category_id)])
+  function priceSummary(row: AdminProductRow): PriceSummary {
+    const ordering = row.ordering_model ?? 'fixed_item'
+    if (ordering === 'cake_servings' || row.legacy_cake_id) {
+      const cake = cakes.find((c) => c.id === row.legacy_cake_id)
+      const prices = sizes
+        .filter((s) => s.enabled && (cake?.available_size_ids ?? []).includes(s.id))
+        .map((s) => s.price)
+      return prices.length
+        ? { text: `حسب المقاس · من ${formatEgp(Math.min(...prices))}`, tone: 'info' }
+        : { text: 'لا توجد مقاسات متاحة', tone: 'danger' }
+    }
+    if (ordering === 'quote' || row.pricing_mode === 'quote') return { text: 'اطلب السعر', tone: 'pending' }
+    const tierPrices = tiers.filter((t) => t.product_id === row.id && t.enabled).map((t) => t.price)
+    if (tierPrices.length) {
+      return { text: `من ${formatEgp(Math.min(...tierPrices))} · ${tierPrices.length} سعر`, tone: 'info' }
+    }
+    if (row.fixed_price != null) {
+      return { text: ordering === 'fixed_item' ? formatEgp(row.fixed_price) : `${formatEgp(row.fixed_price)} للقطعة`, tone: 'info' }
+    }
+    return { text: 'بدون سعر', tone: 'danger' }
+  }
 
   function startNew() {
-    const preferred =
-      categoryChoices.find((c) => leaves.has(c.id) && c.enabled)?.id ??
-      categoryChoices.find((c) => c.enabled)?.id ??
-      ''
-    crud.open({ ...emptyProduct, category_id: preferred, sort_order: nextSort.current }, null)
+    const top =
+      (topFilter !== 'all' && topCategories.find((c) => c.id === topFilter)) || topCategories.find((c) => c.enabled)
+    const sub = top ? childrenOf(top.id).find((c) => (subFilter === 'all' ? c.enabled : c.id === subFilter)) : undefined
+    resetSession()
+    crud.open({ ...emptyProduct, category_id: sub?.id ?? top?.id ?? '', sort_order: nextSort.current }, null)
   }
 
   function startEdit(row: AdminProductRow) {
+    resetSession()
     crud.open({ ...row }, row)
+    if (row.legacy_cake_id) {
+      const cakeId = row.legacy_cake_id
+      void getAdminCakeConfig(cakeId).then((res) => {
+        if (res.error) setCakeConfigError(res.error)
+        else setCakeConfig(res.data ?? defaultCakeConfig())
+      })
+    }
   }
 
   async function runDelete() {
@@ -874,15 +1134,27 @@ export function AdminProductsPage() {
     await crud.load(true)
   }
 
+  /** null = unknown (history could not be loaded) → treat as protected. */
+  function hasHistory(row: AdminProductRow): boolean {
+    return Boolean(row.legacy_cake_id) || withHistory === null || withHistory.has(row.id)
+  }
+
   const draft = crud.draft
   const isCakeLinked = Boolean(draft?.legacy_cake_id)
+  const isCake = isCakeLinked || draft?.ordering_model === 'cake_servings'
   const isEditing = Boolean(crud.original)
+  const draftTop = draft ? rootOf(draft.category_id) : ''
+  const draftSubs = draftTop ? childrenOf(draftTop) : []
+  const ordering = (draft?.ordering_model ?? 'fixed_item') as ProductOrderingModel
+  const orderingChoices = (Object.keys(ORDERING_LABELS) as ProductOrderingModel[]).filter(
+    (m) => m !== 'cake_servings' || !isEditing,
+  )
 
   return (
     <AdminPage>
       <AdminPageHeader
         title="المنتجات"
-        description="منتجات الكتالوج وتصنيفاتها وأسعارها وخياراتها كما تظهر للعملاء."
+        description="كل منتجات الكتالوج: التورت وغيرها. التصنيف وطريقة البيع والسعر والخيارات من مكان واحد."
         actions={
           <>
             <AdminButton icon={<IconRefresh size={18} />} loading={crud.refreshing} disabled={crud.loading} onClick={() => void crud.load(true)}>
@@ -896,14 +1168,59 @@ export function AdminProductsPage() {
       />
 
       {!crud.loading && !crud.error && crud.rows.length > 0 ? (
-        <CatalogToolbar
-          id="products-search"
-          placeholder="ابحثي باسم المنتج أو التصنيف"
-          filter={filter}
-          total={crud.rows.length}
-          visible={filter.filtered.length}
-          noun="منتج"
-        />
+        <>
+          <CatalogToolbar
+            id="products-search"
+            placeholder="ابحثي باسم المنتج"
+            filter={filter}
+            total={crud.rows.length}
+            visible={filter.filtered.length}
+            noun="منتج"
+          />
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <label className="grid gap-1 text-xs font-semibold text-muted">
+              التصنيف الرئيسي
+              <AdminSelect value={topFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="all">كل التصنيفات</option>
+                {topCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {c.enabled ? '' : ' (مخفي)'}
+                  </option>
+                ))}
+              </AdminSelect>
+            </label>
+            <label className="grid gap-1 text-xs font-semibold text-muted">
+              التصنيف الفرعي
+              <AdminSelect
+                value={subFilter}
+                disabled={topFilter === 'all' || childrenOf(topFilter).length === 0}
+                onChange={(e) => setCategoryFilter(topFilter, e.target.value)}
+              >
+                <option value="all">كل الفرعية</option>
+                {topFilter !== 'all'
+                  ? childrenOf(topFilter).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                        {c.enabled ? '' : ' (مخفي)'}
+                      </option>
+                    ))
+                  : null}
+              </AdminSelect>
+            </label>
+            <label className="grid gap-1 text-xs font-semibold text-muted">
+              طريقة البيع
+              <AdminSelect value={modelFilter} onChange={(e) => setModelFilter(e.target.value as ProductOrderingModel | 'all')}>
+                <option value="all">كل الطرق</option>
+                {(Object.keys(ORDERING_LABELS) as ProductOrderingModel[]).map((m) => (
+                  <option key={m} value={m}>
+                    {ORDERING_LABELS[m]}
+                  </option>
+                ))}
+              </AdminSelect>
+            </label>
+          </div>
+        </>
       ) : null}
 
       <CatalogResults
@@ -921,6 +1238,8 @@ export function AdminProductsPage() {
         onClearFilters={() => {
           filter.setQuery('')
           filter.setEnabled('all')
+          setModelFilter('all')
+          setCategoryFilter('all')
         }}
         table={
           <AdminTable
@@ -929,7 +1248,8 @@ export function AdminProductsPage() {
               <>
                 <Th>المنتج</Th>
                 <Th>التصنيف</Th>
-                <Th className="hidden lg:table-cell">التسعير</Th>
+                <Th className="hidden lg:table-cell">طريقة البيع</Th>
+                <Th>السعر</Th>
                 <Th>الحالة</Th>
                 <Th>
                   <span className="sr-only">إجراء</span>
@@ -937,60 +1257,62 @@ export function AdminProductsPage() {
               </>
             }
           >
-            {filter.filtered.map((row) => (
-              <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
-                <Td>
-                  <div className="flex items-center gap-3">
-                    <Thumb imageKey={row.image_key} />
-                    <div className="min-w-0">
-                      <p className="font-bold">{row.name}</p>
-                      {row.legacy_cake_id ? <p className="text-xs text-muted">مرتبط بالتورت</p> : null}
+            {filter.filtered.map((row) => {
+              const price = priceSummary(row)
+              return (
+                <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
+                  <Td>
+                    <div className="flex items-center gap-3">
+                      <Thumb imageKey={row.image_key} />
+                      <p className="min-w-0 font-bold">{row.name}</p>
                     </div>
-                  </div>
-                </Td>
-                <Td>
-                  <AdminBadge tone="info">{categoryPath(categories, row.category_id)}</AdminBadge>
-                </Td>
-                <Td className="hidden text-[0.8125rem] text-muted lg:table-cell">
-                  {ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}
-                  {(row.ordering_model === 'fixed_item' || row.pricing_mode === 'fixed') &&
-                  row.fixed_price != null
-                    ? ` · ${formatEgp(row.fixed_price)}`
-                    : ''}
-                </Td>
-                <Td>
-                  <EnabledBadge enabled={row.enabled} />
-                </Td>
-                <Td className="w-px text-end">
-                  <EditButton label={`تعديل ${row.name}`} onClick={() => startEdit(row)} />
-                </Td>
-              </Tr>
-            ))}
+                  </Td>
+                  <Td>
+                    <AdminBadge tone="info">{categoryPath(categories, row.category_id)}</AdminBadge>
+                  </Td>
+                  <Td className="hidden text-[0.8125rem] text-muted lg:table-cell">
+                    {ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}
+                  </Td>
+                  <Td className="text-[0.8125rem]">
+                    <AdminBadge tone={price.tone}>{price.text}</AdminBadge>
+                  </Td>
+                  <Td>
+                    <div className="flex flex-wrap gap-1.5">
+                      <EnabledBadge enabled={row.enabled} />
+                      {withHistory?.has(row.id) ? <AdminBadge tone="neutral">له طلبات سابقة</AdminBadge> : null}
+                    </div>
+                  </Td>
+                  <Td className="w-px text-end">
+                    <EditButton label={`تعديل ${row.name}`} onClick={() => startEdit(row)} />
+                  </Td>
+                </Tr>
+              )
+            })}
           </AdminTable>
         }
         list={
           <AdminList label="المنتجات">
-            {filter.filtered.map((row) => (
-              <CatalogListItem
-                key={row.id}
-                media={<Thumb imageKey={row.image_key} className="size-14" />}
-                title={row.name}
-                meta={
-                  <span className="text-xs text-muted">
-                    {ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}
-                    {row.legacy_cake_id ? ' · مرتبط بالتورت' : ''}
-                  </span>
-                }
-                badges={
-                  <>
-                    <EnabledBadge enabled={row.enabled} />
-                    <AdminBadge tone="info">{categoryPath(categories, row.category_id)}</AdminBadge>
-                  </>
-                }
-                editLabel={`تعديل ${row.name}`}
-                onEdit={() => startEdit(row)}
-              />
-            ))}
+            {filter.filtered.map((row) => {
+              const price = priceSummary(row)
+              return (
+                <CatalogListItem
+                  key={row.id}
+                  media={<Thumb imageKey={row.image_key} className="size-14" />}
+                  title={row.name}
+                  subtitle={categoryPath(categories, row.category_id)}
+                  meta={<span className="text-xs text-muted">{ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}</span>}
+                  badges={
+                    <>
+                      <EnabledBadge enabled={row.enabled} />
+                      <AdminBadge tone={price.tone}>{price.text}</AdminBadge>
+                      {withHistory?.has(row.id) ? <AdminBadge tone="neutral">له طلبات سابقة</AdminBadge> : null}
+                    </>
+                  }
+                  editLabel={`تعديل ${row.name}`}
+                  onEdit={() => startEdit(row)}
+                />
+              )
+            })}
           </AdminList>
         }
       />
@@ -1005,40 +1327,58 @@ export function AdminProductsPage() {
       >
         {draft ? (
           <>
-            {isCakeLinked ? (
-              <AdminAlert tone="info">
-                هذا المنتج مرتبط بتورتة. يمكن تعديل الاسم والوصف والتصنيف والصورة والترتيب والظهور هنا. المقاسات تُدار من صفحة
-                التورت.
-              </AdminAlert>
-            ) : null}
-
-            <section aria-labelledby="product-basic" className="grid gap-4">
-              <h3 id="product-basic" className="text-sm font-bold text-ink">
-                البيانات الأساسية
+            <section aria-labelledby="product-general" className="grid gap-4">
+              <h3 id="product-general" className="text-sm font-bold text-ink">
+                البيانات العامة
               </h3>
               <div className="grid gap-4 sm:grid-cols-2">
                 <AdminTextField
                   id="product-name"
                   label="اسم المنتج"
                   required
+                  wrapperClassName="sm:col-span-2"
                   value={draft.name}
                   error={crud.fieldErrors.name}
                   onChange={(e) => crud.update({ name: e.target.value })}
                 />
                 <AdminSelectField
                   id="product-category"
-                  label="التصنيف"
+                  label="التصنيف الرئيسي"
                   required
-                  value={draft.category_id}
-                  error={crud.fieldErrors.category_id}
-                  onChange={(e) => crud.update({ category_id: e.target.value })}
+                  value={draftTop}
+                  error={draftSubs.length ? undefined : crud.fieldErrors.category_id}
+                  onChange={(e) => {
+                    const top = e.target.value
+                    const firstSub = childrenOf(top)[0]
+                    crud.update({ category_id: firstSub?.id ?? top })
+                  }}
                 >
-                  {!draft.category_id ? <option value="">اختاري التصنيف</option> : null}
-                  {categoryChoices.map((c) => (
+                  {!draftTop ? <option value="">اختاري التصنيف</option> : null}
+                  {topCategories
+                    .filter((c) => !isCake || c.id === CAKES_ROOT)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                        {c.enabled ? '' : ' (مخفي)'}
+                      </option>
+                    ))}
+                </AdminSelectField>
+                <AdminSelectField
+                  id="product-subcategory"
+                  label="التصنيف الفرعي"
+                  required={isCake}
+                  disabled={draftSubs.length === 0}
+                  hint={draftSubs.length === 0 ? 'لا توجد تصنيفات فرعية لهذا التصنيف.' : undefined}
+                  value={draft.category_id === draftTop ? '' : draft.category_id}
+                  error={draftSubs.length ? crud.fieldErrors.category_id : undefined}
+                  onChange={(e) => crud.update({ category_id: e.target.value || draftTop })}
+                >
+                  {!isCake ? <option value="">بدون تصنيف فرعي</option> : null}
+                  {isCake && draft.category_id === draftTop ? <option value="">اختاري التصنيف الفرعي</option> : null}
+                  {draftSubs.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {categoryPath(categories, c.id)}
+                      {c.name}
                       {c.enabled ? '' : ' (مخفي)'}
-                      {leaves.has(c.id) ? '' : ' — رئيسي'}
                     </option>
                   ))}
                 </AdminSelectField>
@@ -1048,100 +1388,6 @@ export function AdminProductsPage() {
                   wrapperClassName="sm:col-span-2"
                   value={draft.description}
                   onChange={(e) => crud.update({ description: e.target.value })}
-                />
-                {isCakeLinked ? (
-                  <AdminTextField
-                    id="product-ordering-ro"
-                    label="طريقة البيع"
-                    value={ORDERING_LABELS.cake_servings}
-                    readOnly
-                    wrapperClassName="sm:col-span-2"
-                  />
-                ) : (
-                  <>
-                    <AdminSelectField
-                      id="product-ordering"
-                      label="طريقة البيع"
-                      required
-                      value={draft.ordering_model ?? 'fixed_item'}
-                      onChange={(e) => {
-                        const mode = e.target.value as ProductOrderingModel
-                        crud.update({
-                          ordering_model: mode,
-                          pricing_mode:
-                            mode === 'quote' ? 'quote' : mode === 'cake_servings' ? 'cake_sizes' : 'fixed',
-                          fixed_price: mode === 'quote' ? null : draft.fixed_price,
-                        })
-                      }}
-                    >
-                      {(Object.keys(ORDERING_LABELS) as ProductOrderingModel[])
-                        .filter((m) => m !== 'cake_servings')
-                        .map((m) => (
-                          <option key={m} value={m}>
-                            {ORDERING_LABELS[m]}
-                          </option>
-                        ))}
-                    </AdminSelectField>
-                    {(draft.ordering_model === 'fixed_item' ||
-                      draft.ordering_model === 'quantity' ||
-                      draft.ordering_model === 'custom' ||
-                      !draft.ordering_model) ? (
-                      <AdminTextField
-                        id="product-fixed-price"
-                        label={
-                          draft.ordering_model === 'quantity' || draft.ordering_model === 'custom'
-                            ? 'سعر القطعة (إن وُجد)'
-                            : 'السعر الثابت'
-                        }
-                        type="number"
-                        inputMode="decimal"
-                        dir="ltr"
-                        className="text-start"
-                        value={draft.fixed_price == null ? '' : String(draft.fixed_price)}
-                        error={crud.fieldErrors.fixed_price}
-                        onChange={(e) =>
-                          crud.update({
-                            fixed_price: e.target.value === '' ? null : Number(e.target.value),
-                          })
-                        }
-                      />
-                    ) : (
-                      <div />
-                    )}
-                    {draft.ordering_model === 'quantity' || draft.ordering_model === 'custom' ? (
-                      <>
-                        <AdminTextField
-                          id="product-qty-min"
-                          label="أقل كمية"
-                          type="number"
-                          value={String(draft.qty_min ?? 1)}
-                          onChange={(e) => crud.update({ qty_min: Number(e.target.value) || 1 })}
-                        />
-                        <AdminTextField
-                          id="product-qty-max"
-                          label="أعلى كمية"
-                          type="number"
-                          value={String(draft.qty_max ?? 99)}
-                          onChange={(e) => crud.update({ qty_max: Number(e.target.value) || 99 })}
-                        />
-                        <AdminTextField
-                          id="product-qty-step"
-                          label="خطوة الكمية"
-                          type="number"
-                          value={String(draft.qty_step ?? 1)}
-                          onChange={(e) => crud.update({ qty_step: Number(e.target.value) || 1 })}
-                        />
-                      </>
-                    ) : null}
-                  </>
-                )}
-                <AdminTextField
-                  id="product-price-note"
-                  label="ملاحظة السعر"
-                  wrapperClassName="sm:col-span-2"
-                  hint="تظهر للعميل بجانب معلومات التسعير."
-                  value={draft.price_note}
-                  onChange={(e) => crud.update({ price_note: e.target.value })}
                 />
                 <ProductImageField
                   id="product-image"
@@ -1182,22 +1428,165 @@ export function AdminProductsPage() {
               />
             </section>
 
-            {isEditing && crud.original ? (
-              <>
-                <PriceTierSection
-                  productId={crud.original.id}
-                  orderingModel={(draft.ordering_model ?? 'fixed_item') as ProductOrderingModel}
+            <section aria-labelledby="product-selling" className="grid gap-4 border-t border-line pt-5">
+              <h3 id="product-selling" className="text-sm font-bold text-ink">
+                طريقة البيع
+              </h3>
+              {isCakeLinked ? (
+                <AdminTextField id="product-ordering-ro" label="طريقة البيع" value={ORDERING_LABELS.cake_servings} readOnly />
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <AdminSelectField
+                    id="product-ordering"
+                    label="طريقة البيع"
+                    required
+                    wrapperClassName="sm:col-span-2"
+                    value={ordering}
+                    onChange={(e) => {
+                      const mode = e.target.value as ProductOrderingModel
+                      if (mode === 'cake_servings') {
+                        const firstCakeSub = childrenOf(CAKES_ROOT)[0]
+                        setCakeConfig(cakeConfig ?? defaultCakeConfig())
+                        crud.update({
+                          ordering_model: mode,
+                          pricing_mode: 'cake_sizes',
+                          fixed_price: null,
+                          category_id: rootOf(draft.category_id) === CAKES_ROOT ? draft.category_id : (firstCakeSub?.id ?? ''),
+                        })
+                        return
+                      }
+                      setCakeConfig(null)
+                      setCakeConfigError('')
+                      crud.update({
+                        ordering_model: mode,
+                        pricing_mode: pricingModeFromOrdering(mode),
+                        fixed_price: mode === 'quote' ? null : draft.fixed_price,
+                      })
+                    }}
+                  >
+                    {orderingChoices.map((m) => (
+                      <option key={m} value={m}>
+                        {ORDERING_LABELS[m]}
+                      </option>
+                    ))}
+                  </AdminSelectField>
+                  {ordering === 'quantity' || ordering === 'custom' ? (
+                    <>
+                      <AdminTextField
+                        id="product-qty-min"
+                        label="أقل كمية"
+                        type="number"
+                        value={String(draft.qty_min ?? 1)}
+                        onChange={(e) => crud.update({ qty_min: Number(e.target.value) || 1 })}
+                      />
+                      <AdminTextField
+                        id="product-qty-max"
+                        label="أعلى كمية"
+                        type="number"
+                        value={String(draft.qty_max ?? 99)}
+                        onChange={(e) => crud.update({ qty_max: Number(e.target.value) || 99 })}
+                      />
+                      <AdminTextField
+                        id="product-qty-step"
+                        label="خطوة الكمية"
+                        type="number"
+                        value={String(draft.qty_step ?? 1)}
+                        onChange={(e) => crud.update({ qty_step: Number(e.target.value) || 1 })}
+                      />
+                    </>
+                  ) : null}
+                </div>
+              )}
+            </section>
+
+            <section aria-labelledby="product-pricing" className="grid gap-4 border-t border-line pt-5">
+              <h3 id="product-pricing" className="text-sm font-bold text-ink">
+                التسعير
+              </h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {!isCake && (ordering === 'fixed_item' || ordering === 'quantity' || ordering === 'custom') ? (
+                  <AdminTextField
+                    id="product-fixed-price"
+                    label={ordering === 'fixed_item' ? 'السعر الثابت' : 'سعر القطعة (إن وُجد)'}
+                    required={ordering === 'fixed_item'}
+                    type="number"
+                    inputMode="decimal"
+                    dir="ltr"
+                    className="text-start"
+                    value={draft.fixed_price == null ? '' : String(draft.fixed_price)}
+                    error={crud.fieldErrors.fixed_price}
+                    onChange={(e) => crud.update({ fixed_price: e.target.value === '' ? null : Number(e.target.value) })}
+                  />
+                ) : null}
+                {isCake ? (
+                  <p className="text-[0.8125rem] leading-6 text-muted sm:col-span-2">
+                    السعر يُحسب من مقاس التورتة الذي يختاره العميل (من إعدادات التورتة بالأسفل).
+                  </p>
+                ) : null}
+                {ordering === 'quote' ? (
+                  <p className="text-[0.8125rem] leading-6 text-muted sm:col-span-2">
+                    يظهر للعميل «اطلب السعر»، ويُحدَّد السعر عند تأكيد الطلب.
+                  </p>
+                ) : null}
+                <AdminTextField
+                  id="product-price-note"
+                  label="ملاحظة السعر"
+                  wrapperClassName="sm:col-span-2"
+                  hint="تظهر للعميل بجانب معلومات التسعير."
+                  value={draft.price_note}
+                  onChange={(e) => crud.update({ price_note: e.target.value })}
                 />
-                <OptionLinkSection productId={crud.original.id} isCakeLinked={isCakeLinked} />
-              </>
+              </div>
+              {!isCake && (ordering === 'quantity' || ordering === 'custom' || ordering === 'weight') && !isEditing ? (
+                <AdminAlert tone="info">احفظي المنتج أولًا ثم أضيفي الباكدجات أو الشرائح.</AdminAlert>
+              ) : null}
+            </section>
+
+            {isEditing && crud.original && !isCake ? (
+              <PriceTierSection productId={crud.original.id} orderingModel={ordering} />
+            ) : null}
+
+            {isCake ? (
+              cakeConfig ? (
+                <CakeConfigSection
+                  config={cakeConfig}
+                  onChange={(patch) => {
+                    setCakeConfig({ ...cakeConfig, ...patch })
+                    setCakeConfigError('')
+                  }}
+                  sizes={sizes}
+                  fillings={fillings}
+                  extras={extras}
+                  error={cakeConfigError}
+                />
+              ) : (
+                <section className="grid gap-2 border-t border-line pt-5">
+                  <h3 className="text-sm font-bold text-ink">إعدادات التورتة</h3>
+                  {cakeConfigError ? (
+                    <AdminAlert tone="error">{cakeConfigError}</AdminAlert>
+                  ) : (
+                    <p className="text-sm text-muted">جاري التحميل…</p>
+                  )}
+                </section>
+              )
+            ) : null}
+
+            {isEditing && crud.original ? (
+              <OptionLinkSection productId={crud.original.id} isCakeLinked={isCake} />
             ) : null}
 
             {isEditing && crud.original ? (
               <div className="grid gap-2 border-t border-line pt-4">
                 {isCakeLinked ? (
                   <p className="text-[0.8125rem] leading-6 text-muted">
-                    منتجات التورت المرتبطة لا تُحذف من هنا. أخفيها أو أديريها من صفحة التورت.
+                    التورت لا تُحذف حتى لا تتأثر الطلبات السابقة. أخفيها بدلًا من ذلك.
                   </p>
+                ) : hasHistory(crud.original) ? (
+                  <AdminAlert tone="info" title="له طلبات سابقة — يمكن إخفاؤه ولا يمكن حذفه">
+                    {withHistory === null
+                      ? 'تعذّر التحقق من الطلبات السابقة، لذلك الحذف غير متاح الآن. يمكنك إخفاء المنتج من «ظاهر في الموقع».'
+                      : 'للحفاظ على سجل الطلبات، أوقفي «ظاهر في الموقع» بالأعلى ثم احفظي لإخفاء المنتج عن العملاء.'}
+                  </AdminAlert>
                 ) : (
                   <div>
                     <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmDelete(true)}>
@@ -1219,7 +1608,7 @@ export function AdminProductsPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="حذف المنتج؟"
-        body="سيتم حذف هذا المنتج وخياراته نهائيًا إن لم يكن مستخدمًا في عرض."
+        body="الحذف النهائي متاح فقط للمنتجات التي ليس لها طلبات سابقة. سيتم حذف هذا المنتج وأسعاره وخياراته نهائيًا، ولا يمكن التراجع. إن كنتِ تريدين إيقافه مؤقتًا فاختاري الإخفاء بدلًا من ذلك."
         confirmLabel="حذف"
         cancelLabel="رجوع"
         danger
@@ -1230,3 +1619,4 @@ export function AdminProductsPage() {
     </AdminPage>
   )
 }
+

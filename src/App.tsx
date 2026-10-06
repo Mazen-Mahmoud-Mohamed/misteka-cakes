@@ -12,7 +12,7 @@ import { AdminHomePage } from '@/pages/admin/AdminHomePage'
 import { AdminLoginPage } from '@/pages/admin/AdminLoginPage'
 import { AdminOrderDetailPage } from '@/pages/admin/AdminOrderDetailPage'
 import { AdminOrdersPage } from '@/pages/admin/AdminOrdersPage'
-import { AdminCakesPage } from '@/pages/admin/AdminCakesPage'
+import { AdminPricingPage } from '@/pages/admin/AdminPricingPage'
 import { AdminCategoriesPage } from '@/pages/admin/AdminCategoriesPage'
 import { AdminSizesPage } from '@/pages/admin/AdminSizesPage'
 import { AdminFillingsPage } from '@/pages/admin/AdminFillingsPage'
@@ -96,7 +96,8 @@ function AdminRoutes() {
             <Route index element={<AdminHomePage />} />
             <Route path="orders" element={<AdminOrdersPage />} />
             <Route path="orders/:id" element={<AdminOrderDetailPage />} />
-            <Route path="cakes" element={<AdminCakesPage />} />
+            <Route path="cakes" element={<Navigate to="/admin/products?category=cat-cakes" replace />} />
+            <Route path="pricing" element={<AdminPricingPage />} />
             <Route path="products" element={<AdminProductsPage />} />
             <Route path="options" element={<AdminOptionsLibraryPage />} />
             <Route path="categories" element={<AdminCategoriesPage />} />

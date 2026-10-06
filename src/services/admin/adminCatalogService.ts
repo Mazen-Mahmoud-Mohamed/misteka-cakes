@@ -94,43 +94,6 @@ export async function listAdminCakes() {
   return { data: (data ?? []) as AdminCakeRow[], error: null }
 }
 
-export async function upsertAdminCake(row: AdminCakeRow) {
-  const { supabase, error } = await requireClient()
-  if (!supabase) return { ok: false, message: error! }
-  const payload = {
-    ...row,
-    available_size_ids: row.available_size_ids ?? [],
-    filling_ids: row.filling_ids ?? [],
-    extra_ids: row.extra_ids ?? [],
-  }
-  const { error: qErr } = await supabase.from('cakes').upsert(payload, { onConflict: 'id' })
-  if (qErr) return { ok: false, message: 'تعذّر حفظ التورتة.' }
-
-  // Keep products catalog in sync when the products system migration is applied.
-  const { error: productErr } = await supabase.from('products').upsert(
-    {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      category_id: row.category,
-      pricing_mode: 'cake_sizes',
-      fixed_price: null,
-      price_note: row.price_note ?? '',
-      legacy_cake_id: row.id,
-      image_key: row.image_key,
-      image_alt: row.image_alt || row.name,
-      sort_order: row.sort_order,
-      enabled: row.enabled,
-    },
-    { onConflict: 'id' },
-  )
-  if (productErr) {
-    console.warn('[admin] product sync skipped:', productErr.message)
-  }
-
-  return { ok: true, message: 'تم حفظ التورتة.' }
-}
-
 export async function listAdminFillings() {
   const { supabase, error } = await requireClient()
   if (!supabase) return fail<AdminFillingRow[]>(error!)
@@ -177,48 +140,6 @@ export async function upsertAdminZone(row: AdminZoneRow) {
   const { error: qErr } = await supabase.from('delivery_zones').upsert(row, { onConflict: 'id' })
   if (qErr) return { ok: false, message: 'تعذّر حفظ المنطقة.' }
   return { ok: true, message: 'تم حفظ المنطقة.' }
-}
-
-export type AdminCategoryRow = {
-  id: string
-  name: string
-  description: string
-  sort_order: number
-  enabled: boolean
-}
-
-export async function listAdminCategories() {
-  const { supabase, error } = await requireClient()
-  if (!supabase) return fail<AdminCategoryRow[]>(error!)
-  const { data, error: qErr } = await supabase
-    .from('cake_categories')
-    .select('id, name, description, sort_order, enabled')
-    .order('sort_order')
-  if (qErr) return fail<AdminCategoryRow[]>('تعذّر تحميل التصنيفات.')
-  return { data: (data ?? []) as AdminCategoryRow[], error: null }
-}
-
-export async function upsertAdminCategory(row: AdminCategoryRow) {
-  const { supabase, error } = await requireClient()
-  if (!supabase) return { ok: false, message: error! }
-  const { error: qErr } = await supabase.from('cake_categories').upsert(row, { onConflict: 'id' })
-  if (qErr) return { ok: false, message: 'تعذّر حفظ التصنيف.' }
-  return { ok: true, message: 'تم حفظ التصنيف.' }
-}
-
-/** Hard delete; the database refuses it while any cake still uses the category. */
-export async function deleteAdminCategory(id: string) {
-  const { supabase, error } = await requireClient()
-  if (!supabase) return { ok: false, message: error! }
-  const { error: qErr, count } = await supabase.from('cake_categories').delete({ count: 'exact' }).eq('id', id)
-  if (qErr) {
-    return {
-      ok: false,
-      message: qErr.code === '23503' ? 'لا يمكن حذف تصنيف مرتبط بتورت. أخفيه بدلًا من ذلك.' : 'تعذّر حذف التصنيف.',
-    }
-  }
-  if (!count) return { ok: false, message: 'تعذّر حذف التصنيف.' }
-  return { ok: true, message: 'تم حذف التصنيف.' }
 }
 
 export function slugifyId(value: string): string {

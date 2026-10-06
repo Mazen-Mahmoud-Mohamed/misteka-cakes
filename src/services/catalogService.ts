@@ -1,6 +1,7 @@
 import { timeSlots } from '@/data/options'
 import { getCatalog } from '@/services/catalogStore'
 import type { Cake, CakeSize, PricingGroup } from '@/types'
+import type { PricingContentSection } from '@/types/pricing'
 import type { Offer, Product, ProductCategory } from '@/types/products'
 
 /**
@@ -112,17 +113,9 @@ export function getSize(id: string): CakeSize | undefined {
   return getCatalog().sizes.find((size) => size.id === id)
 }
 
-/** Splits enabled sizes already loaded into the catalog store (sort_order preserved). */
-export function getBasicPricing(): { single: CakeSize[]; twoTier: CakeSize[] } {
-  const sizes = getCatalog().sizes
-  return {
-    single: sizes.filter((size) => size.group === 'single'),
-    twoTier: sizes.filter((size) => size.group === 'two-tier'),
-  }
-}
-
-export function getPricingNotes() {
-  return getCatalog().pricingNotes
+/** Public pricing page sections, in display order. Display only — never used for checkout. */
+export function listPricingSections(): PricingContentSection[] {
+  return [...getCatalog().pricingSections].sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
 export function listFillings() {

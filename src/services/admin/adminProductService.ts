@@ -223,18 +223,136 @@ export async function upsertAdminProduct(row: AdminProductRow) {
   return { ok: true, message: 'تم حفظ المنتج.' }
 }
 
+/** Per-cake configuration kept in public.cakes (read by the customer cake flow and place_order). */
+export type AdminCakeConfig = {
+  pricing_group: 'single' | 'two-tier'
+  serving_info: string
+  available_size_ids: string[]
+  filling_ids: string[]
+  extra_ids: string[]
+  base_price: number | null
+  image_position: string
+}
+
+export async function getAdminCakeConfig(cakeId: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<AdminCakeConfig>(error!)
+  const { data, error: qErr } = await supabase
+    .from('cakes')
+    .select('pricing_group, serving_info, available_size_ids, filling_ids, extra_ids, base_price, image_position')
+    .eq('id', cakeId)
+    .maybeSingle()
+  if (qErr) return fail<AdminCakeConfig>('تعذّر تحميل إعدادات التورتة.')
+  if (!data) return { data: null, error: null }
+  const row = data as AdminCakeConfig
+  return {
+    data: {
+      ...row,
+      available_size_ids: row.available_size_ids ?? [],
+      filling_ids: row.filling_ids ?? [],
+      extra_ids: row.extra_ids ?? [],
+    },
+    error: null,
+  }
+}
+
+/**
+ * Saves a cake product: public.cakes first (products.legacy_cake_id references it),
+ * then the products row. Name, image, category and visibility are written to both.
+ */
+export async function upsertAdminCakeProduct(row: AdminProductRow, config: AdminCakeConfig) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const cakeId = row.legacy_cake_id || row.id
+  const { error: cakeErr } = await supabase.from('cakes').upsert(
+    {
+      id: cakeId,
+      name: row.name,
+      description: row.description,
+      image_key: row.image_key,
+      image_alt: row.image_alt || row.name,
+      image_position: config.image_position || 'center',
+      category: row.category_id,
+      pricing_group: config.pricing_group,
+      base_price: config.base_price,
+      price_note: row.price_note,
+      serving_info: config.serving_info,
+      available_size_ids: config.available_size_ids,
+      filling_ids: config.filling_ids,
+      extra_ids: config.extra_ids,
+      sort_order: row.sort_order,
+      enabled: row.enabled,
+    },
+    { onConflict: 'id' },
+  )
+  if (cakeErr) {
+    return {
+      ok: false,
+      message: cakeErr.code === '23503' ? 'اختاري تصنيفًا فرعيًا تحت التورت.' : 'تعذّر حفظ إعدادات التورتة.',
+    }
+  }
+  const { error: qErr } = await supabase
+    .from('products')
+    .upsert({ ...row, legacy_cake_id: cakeId, ordering_model: 'cake_servings', pricing_mode: 'cake_sizes' }, { onConflict: 'id' })
+  if (qErr) return { ok: false, message: 'تعذّر حفظ المنتج.' }
+  return { ok: true, message: 'تم حفظ المنتج.' }
+}
+
+export const PRODUCT_HAS_HISTORY_MESSAGE = 'لا يمكن حذف منتج له طلبات سابقة. يمكنك إخفاؤه بدلًا من حذفه.'
+
+/** Product ids referenced by any historical order (orders.product_id or order_items.product_id). */
+export async function listAdminProductIdsWithOrders() {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<Set<string>>(error!)
+  const [ordersRes, itemsRes] = await Promise.all([
+    supabase.from('orders').select('product_id').not('product_id', 'is', null),
+    supabase.from('order_items').select('product_id').not('product_id', 'is', null),
+  ])
+  if (ordersRes.error || itemsRes.error) return fail<Set<string>>('تعذّر التحقق من الطلبات السابقة.')
+  const ids = new Set<string>()
+  for (const row of [...(ordersRes.data ?? []), ...(itemsRes.data ?? [])]) {
+    const id = (row as { product_id: string | null }).product_id
+    if (id) ids.add(id)
+  }
+  return { data: ids, error: null }
+}
+
+async function productHasOrderHistory(
+  supabase: NonNullable<ReturnType<typeof getSupabase>>,
+  id: string,
+): Promise<boolean | null> {
+  const [ordersRes, itemsRes] = await Promise.all([
+    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('product_id', id),
+    supabase.from('order_items').select('id', { count: 'exact', head: true }).eq('product_id', id),
+  ])
+  if (ordersRes.error || itemsRes.error || ordersRes.count == null || itemsRes.count == null) return null
+  return ordersRes.count > 0 || itemsRes.count > 0
+}
+
 export async function deleteAdminProduct(id: string) {
   const { supabase, error } = await requireClient()
   if (!supabase) return { ok: false, message: error! }
-  const { data: product } = await supabase.from('products').select('legacy_cake_id').eq('id', id).maybeSingle()
-  if (product?.legacy_cake_id) {
-    return { ok: false, message: 'منتجات التورت المرتبطة لا تُحذف من هنا. أخفيها أو أديريها من التورت.' }
+  const { data: product, error: productErr } = await supabase
+    .from('products')
+    .select('legacy_cake_id')
+    .eq('id', id)
+    .maybeSingle()
+  if (productErr || !product) return { ok: false, message: 'تعذّر حذف المنتج.' }
+  if (product.legacy_cake_id) {
+    return { ok: false, message: 'التورت لا تُحذف حتى لا تتأثر الطلبات السابقة. أخفيها بدلًا من ذلك.' }
   }
+  const hasHistory = await productHasOrderHistory(supabase, id)
+  if (hasHistory === null) return { ok: false, message: 'تعذّر التحقق من الطلبات السابقة. لم يتم الحذف.' }
+  if (hasHistory) return { ok: false, message: PRODUCT_HAS_HISTORY_MESSAGE }
   const { error: qErr, count } = await supabase.from('products').delete({ count: 'exact' }).eq('id', id)
   if (qErr) {
     return {
       ok: false,
-      message: qErr.code === '23503' ? 'لا يمكن حذف منتج مستخدم في عرض. أخفيه بدلًا من ذلك.' : 'تعذّر حذف المنتج.',
+      message: qErr.message.includes('product_has_order_history')
+        ? PRODUCT_HAS_HISTORY_MESSAGE
+        : qErr.code === '23503'
+          ? 'لا يمكن حذف منتج مستخدم في عرض. أخفيه بدلًا من ذلك.'
+          : 'تعذّر حذف المنتج.',
     }
   }
   if (!count) return { ok: false, message: 'تعذّر حذف المنتج.' }

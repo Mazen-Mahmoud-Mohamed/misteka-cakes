@@ -6,9 +6,11 @@ import pearls from '@/assets/cakes/pearls.jpeg'
 import ribbons from '@/assets/cakes/ribbons.jpeg'
 import { cakes as localCakes, localCategories } from '@/data/cakes'
 import { deliveryPolicy, deliveryZones, designExtras, fillings } from '@/data/options'
-import { basicCakePricing, pricingNotes, singleTierSizes, twoTierSizes } from '@/data/pricing'
+import { pricingNotes, singleTierSizes, twoTierSizes } from '@/data/pricing'
 import { createLocalOffers, createLocalProducts, localProductCategories } from '@/data/products'
+import { deriveDefaultPricingSections } from '@/services/pricingContent'
 import type { Cake, CakeCategoryInfo, CakeSize, DeliveryZone, DesignExtra, Filling } from '@/types'
+import type { PricingContentSection } from '@/types/pricing'
 import type { Offer, Product, ProductCategory } from '@/types/products'
 
 export const cakeImageMap: Record<string, string> = {
@@ -32,23 +34,26 @@ export interface CatalogBundle {
   fillings: Filling[]
   extras: DesignExtra[]
   zones: DeliveryZone[]
-  pricingNotes: string[]
+  pricingSections: PricingContentSection[]
   deliveryFee: number | null
   deliveryNote: string
 }
 
 export function createLocalCatalog(): CatalogBundle {
+  const sizes = [...singleTierSizes, ...twoTierSizes]
+  const productCategories = [...localProductCategories]
+  const products = createLocalProducts()
   return {
     cakes: localCakes,
     categories: [...localCategories],
-    productCategories: [...localProductCategories],
-    products: createLocalProducts(),
+    productCategories,
+    products,
     offers: createLocalOffers(),
-    sizes: [...singleTierSizes, ...twoTierSizes],
+    sizes,
     fillings: [...fillings],
     extras: [...designExtras],
     zones: deliveryZones.filter((zone) => zone.enabled),
-    pricingNotes: [...pricingNotes],
+    pricingSections: deriveDefaultPricingSections({ sizes, products, productCategories, notes: pricingNotes }),
     deliveryFee: deliveryPolicy.fee,
     deliveryNote: deliveryPolicy.note,
   }
@@ -83,8 +88,4 @@ export function resolveCakeImage(imageKeyOrUrl: string): string {
     if (base) return `${base}/storage/v1/object/public/${CAKE_IMAGE_BUCKET}/${imageKeyOrUrl}`
   }
   return cakeImageMap[imageKeyOrUrl] ?? imageKeyOrUrl
-}
-
-export function getLocalBasicPricing() {
-  return basicCakePricing
 }

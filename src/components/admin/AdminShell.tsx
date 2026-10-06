@@ -13,6 +13,7 @@ import {
   IconMapPin,
   IconMenu,
   IconOrders,
+  IconReceipt,
   IconRuler,
   IconSparkles,
   IconTag,
@@ -37,16 +38,16 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
     label: 'المحتوى',
     items: [
       { to: '/admin/products', label: 'المنتجات', end: false, icon: <IconCake /> },
-      { to: '/admin/options', label: 'مكتبة الخيارات', end: false, icon: <IconLayers /> },
       { to: '/admin/categories', label: 'التصنيفات', end: false, icon: <IconTag /> },
+      { to: '/admin/options', label: 'مكتبة الخيارات', end: false, icon: <IconLayers /> },
       { to: '/admin/offers', label: 'العروض والباقات', end: false, icon: <IconSparkles /> },
+      { to: '/admin/pricing', label: 'الأسعار', end: false, icon: <IconReceipt /> },
       { to: '/admin/reviews', label: 'آراء العملاء', end: false, icon: <IconMessage /> },
     ],
   },
   {
-    label: 'التورت (تفصيلي)',
+    label: 'إعدادات التورت التفصيلية',
     items: [
-      { to: '/admin/cakes', label: 'التورت', end: false, icon: <IconCake /> },
       { to: '/admin/sizes', label: 'المقاسات والأسعار', end: false, icon: <IconRuler /> },
       { to: '/admin/fillings', label: 'الحشوات', end: false, icon: <IconLayers /> },
       { to: '/admin/extras', label: 'الإضافات', end: false, icon: <IconSparkles /> },

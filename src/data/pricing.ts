@@ -27,11 +27,7 @@ export const twoTierSizes: CakeSize[] = [
   { id: 'tier-24-30', group: 'two-tier', label: '24 فوق × 30 تحت', servingsLabel: '50+ فرد', servingsMin: 50, servingsMax: null, price: 2600 },
 ]
 
-export const basicCakePricing = {
-  single: singleTierSizes,
-  twoTier: twoTierSizes,
-}
-
+/** Local-only fallback notes; live notes come from Admin → الأسعار. */
 export const pricingNotes = [
   'يمكن تنفيذ جميع المقاسات حسب طلب العميل.',
   'التوصيل عبر أوبر على حساب العميل وخارج سعر التورتة.',

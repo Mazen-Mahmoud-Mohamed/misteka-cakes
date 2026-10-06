@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { AdminAlert } from '@/components/admin/AdminAlert'
 import { AdminBadge, EnabledBadge } from '@/components/admin/AdminBadge'
-import { AdminButton } from '@/components/admin/AdminButton'
-import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
+import { AdminButton, AdminIconButton } from '@/components/admin/AdminButton'
+import { AdminPage, AdminPageHeader, adminSurfaceClass } from '@/components/admin/AdminCard'
 import { AdminSelectField, AdminSwitch, AdminTextAreaField, AdminTextField } from '@/components/admin/AdminField'
-import { AdminList, AdminTable, Td, Th, Tr } from '@/components/admin/AdminTable'
+import { AdminEmptyState, AdminErrorState, AdminListSkeleton } from '@/components/admin/AdminStates'
 import {
   CatalogEditor,
-  CatalogListItem,
-  CatalogResults,
   CatalogToolbar,
   EditButton,
   SORT_HINT,
@@ -15,8 +15,19 @@ import {
   useCatalogFilter,
 } from '@/components/admin/catalog'
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
-import { IconPlus, IconRefresh, IconTag } from '@/components/admin/icons'
+import {
+  IconArrowDown,
+  IconArrowUp,
+  IconChevronForward,
+  IconEye,
+  IconEyeOff,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconTag,
+} from '@/components/admin/icons'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { cx } from '@/utils/cx'
 import {
   deleteAdminProductCategory,
   generateId,
@@ -64,6 +75,10 @@ export function AdminCategoriesPage() {
   const [deleteError, setDeleteError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [rowBusy, setRowBusy] = useState(false)
+  const [rowError, setRowError] = useState('')
+  const [confirmHide, setConfirmHide] = useState<AdminProductCategoryRow | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const categoryIds = useRef<string[]>([])
   const categoriesRef = useRef<AdminProductCategoryRow[]>([])
   const nextSort = useRef(10)
@@ -117,7 +132,48 @@ export function AdminCategoriesPage() {
 
   const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.description])
   const filteredIds = new Set(filter.filtered.map((row) => row.id))
-  const tree = flattenTree(crud.rows).filter(({ row }) => filteredIds.has(row.id))
+  const tree = flattenTree(crud.rows)
+  const groups = tree
+    .filter(({ depth }) => depth === 0)
+    .map(({ row }) => ({
+      root: row,
+      rootMatches: filteredIds.has(row.id),
+      children: tree
+        .filter(({ row: c, depth }) => depth > 0 && c.parent_id === row.id && filteredIds.has(c.id))
+        .map(({ row: c }) => c),
+    }))
+    .filter((g) => g.rootMatches || g.children.length > 0)
+
+  function toggleCollapsed(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function metaBadges(row: AdminProductCategoryRow, childCount = 0) {
+    return (
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-muted">
+        {row.kind === 'offers' ? (
+          <AdminBadge tone="neutral">العروض والباقات</AdminBadge>
+        ) : (
+          <Link
+            to={`/admin/products?category=${row.parent_id ?? row.id}${row.parent_id ? `&sub=${row.id}` : ''}`}
+            className="rounded-full"
+          >
+            <AdminBadge tone="info">{treeCountLabel(row)}</AdminBadge>
+          </Link>
+        )}
+        {childCount ? <AdminBadge tone="neutral">{childCount} فرعي</AdminBadge> : null}
+        <EnabledBadge enabled={row.enabled} />
+        <span className="tabular-nums" title="ترتيب العرض">
+          ترتيب {row.sort_order}
+        </span>
+      </div>
+    )
+  }
 
   function startNew(parentId: string | null = null) {
     const siblings = crud.rows.filter((c) => c.parent_id === parentId)
@@ -157,6 +213,80 @@ export function AdminCategoriesPage() {
     return n === 0 ? 'لا توجد منتجات' : n === 1 ? 'منتج واحد' : `${n} منتجات`
   }
 
+  function treeCountLabel(row: AdminProductCategoryRow) {
+    if (row.parent_id) return countLabel(row.id)
+    const own = productCounts[row.id] ?? 0
+    const total = crud.rows
+      .filter((c) => c.parent_id === row.id)
+      .reduce((sum, c) => sum + (productCounts[c.id] ?? 0), own)
+    return total === 0 ? 'لا توجد منتجات' : total === 1 ? 'منتج واحد' : `${total} منتجات`
+  }
+
+  function siblingsOf(row: AdminProductCategoryRow) {
+    return crud.rows
+      .filter((c) => c.parent_id === row.parent_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar'))
+  }
+
+  async function move(row: AdminProductCategoryRow, delta: -1 | 1) {
+    const siblings = siblingsOf(row)
+    const index = siblings.findIndex((c) => c.id === row.id)
+    const other = siblings[index + delta]
+    if (!other) return
+    setRowBusy(true)
+    const rowOrder = row.sort_order === other.sort_order ? other.sort_order + delta : other.sort_order
+    const [a, b] = await Promise.all([
+      upsertAdminProductCategory({ ...row, sort_order: rowOrder }),
+      upsertAdminProductCategory({ ...other, sort_order: row.sort_order }),
+    ])
+    setRowBusy(false)
+    if (!a.ok || !b.ok) setRowError('تعذّر تغيير الترتيب. حاولي مرة أخرى.')
+    else setRowError('')
+    await crud.load(true)
+  }
+
+  async function setVisibility(row: AdminProductCategoryRow, enabled: boolean) {
+    setRowBusy(true)
+    const result = await upsertAdminProductCategory({ ...row, enabled })
+    setRowBusy(false)
+    setConfirmHide(null)
+    setRowError(result.ok ? '' : 'تعذّر تغيير الظهور. حاولي مرة أخرى.')
+    await crud.load(true)
+  }
+
+  function rowActions(row: AdminProductCategoryRow) {
+    const siblings = siblingsOf(row)
+    const index = siblings.findIndex((c) => c.id === row.id)
+    const canHaveChildren = !row.parent_id && row.kind !== 'offers'
+    return (
+      <div className="ms-auto flex shrink-0 flex-wrap items-center justify-end gap-0.5">
+        {canHaveChildren ? (
+          <AdminIconButton label={`إضافة تصنيف فرعي تحت ${row.name}`} disabled={rowBusy} onClick={() => startNew(row.id)}>
+            <IconPlus size={18} />
+          </AdminIconButton>
+        ) : null}
+        <AdminIconButton label={`نقل ${row.name} لأعلى`} disabled={rowBusy || index <= 0} onClick={() => void move(row, -1)}>
+          <IconArrowUp size={18} />
+        </AdminIconButton>
+        <AdminIconButton
+          label={`نقل ${row.name} لأسفل`}
+          disabled={rowBusy || index === siblings.length - 1}
+          onClick={() => void move(row, 1)}
+        >
+          <IconArrowDown size={18} />
+        </AdminIconButton>
+        <AdminIconButton
+          label={row.enabled ? `إخفاء ${row.name}` : `إظهار ${row.name}`}
+          disabled={rowBusy}
+          onClick={() => (row.enabled ? setConfirmHide(row) : void setVisibility(row, true))}
+        >
+          {row.enabled ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+        </AdminIconButton>
+        <EditButton label={`تعديل ${row.name}`} onClick={() => crud.open({ ...row }, row)} />
+      </div>
+    )
+  }
+
   const parentChoices = crud.rows.filter(
     (c) => !c.parent_id && c.kind !== 'offers' && c.id !== draft?.id,
   )
@@ -178,6 +308,12 @@ export function AdminCategoriesPage() {
         }
       />
 
+      {rowError ? (
+        <AdminAlert tone="error" className="mb-4" onClose={() => setRowError('')}>
+          {rowError}
+        </AdminAlert>
+      ) : null}
+
       {!crud.loading && !crud.error && crud.rows.length > 0 ? (
         <CatalogToolbar
           id="categories-search"
@@ -189,88 +325,123 @@ export function AdminCategoriesPage() {
         />
       ) : null}
 
-      <CatalogResults
-        loading={crud.loading}
-        error={crud.error}
-        onRetry={() => void crud.load(true)}
-        retrying={crud.refreshing}
-        total={crud.rows.length}
-        visible={filter.filtered.length}
-        emptyTitle="لا توجد تصنيفات"
-        emptyDescription="أضيفي أول تصنيف لتنظيم المنتجات في الموقع."
-        emptyIcon={<IconTag />}
-        addLabel="إضافة تصنيف"
-        onAdd={() => startNew(null)}
-        onClearFilters={() => {
-          filter.setQuery('')
-          filter.setEnabled('all')
-        }}
-        table={
-          <AdminTable
-            caption="التصنيفات"
-            head={
-              <>
-                <Th>التصنيف</Th>
-                <Th>عدد المنتجات</Th>
-                <Th className="text-center">ترتيب العرض</Th>
-                <Th>الحالة</Th>
-                <Th>
-                  <span className="sr-only">إجراء</span>
-                </Th>
-              </>
-            }
-          >
-            {tree.map(({ row, depth }) => (
-              <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
-                <Td>
-                  <div style={{ paddingInlineStart: depth * 1.25 + 'rem' }}>
-                    <p className="font-bold">
-                      {depth > 0 ? <span className="me-1 text-muted">└</span> : null}
-                      {row.name}
-                    </p>
-                    {row.description ? <p className="text-xs text-muted">{row.description}</p> : null}
-                    {row.kind === 'offers' ? <p className="text-xs text-muted">قسم العروض</p> : null}
+      {crud.loading ? <AdminListSkeleton rows={5} label="جاري تحميل التصنيفات" /> : null}
+
+      {!crud.loading && crud.error ? (
+        <AdminErrorState description={crud.error} onRetry={() => void crud.load(true)} retrying={crud.refreshing} />
+      ) : null}
+
+      {!crud.loading && !crud.error && crud.rows.length === 0 ? (
+        <AdminEmptyState
+          icon={<IconTag />}
+          title="لا توجد تصنيفات"
+          description="أضيفي أول تصنيف لتنظيم المنتجات في الموقع."
+          action={
+            <AdminButton variant="primary" icon={<IconPlus size={18} />} onClick={() => startNew(null)}>
+              إضافة تصنيف
+            </AdminButton>
+          }
+        />
+      ) : null}
+
+      {!crud.loading && !crud.error && crud.rows.length > 0 && groups.length === 0 ? (
+        <AdminEmptyState
+          icon={<IconSearch />}
+          title="لا توجد نتائج مطابقة"
+          description="جرّبي كلمة بحث أخرى أو غيّري تصفية الحالة."
+          action={
+            <AdminButton
+              onClick={() => {
+                filter.setQuery('')
+                filter.setEnabled('all')
+              }}
+            >
+              مسح التصفية
+            </AdminButton>
+          }
+        />
+      ) : null}
+
+      {!crud.loading && !crud.error && groups.length > 0 ? (
+        <ul className="grid gap-3" aria-label="التصنيفات">
+          {groups.map(({ root, rootMatches, children }) => {
+            const allChildren = crud.rows.filter((c) => c.parent_id === root.id)
+            const open = filter.active ? true : !collapsed.has(root.id)
+            const panelId = `category-children-${root.id}`
+            return (
+              <li key={root.id} className={cx(adminSurfaceClass, 'overflow-hidden', !root.enabled && 'bg-ivory/60')}>
+                <div
+                  className={cx(
+                    'flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:px-4',
+                    !rootMatches && 'opacity-70',
+                  )}
+                >
+                  <div className="flex min-w-0 flex-1 basis-56 items-center gap-1.5">
+                    {allChildren.length ? (
+                      <AdminIconButton
+                        label={open ? `طي فروع ${root.name}` : `عرض فروع ${root.name}`}
+                        aria-expanded={open}
+                        aria-controls={panelId}
+                        disabled={filter.active}
+                        onClick={() => toggleCollapsed(root.id)}
+                        className="-ms-1.5"
+                      >
+                        <IconChevronForward
+                          size={18}
+                          className={cx(
+                            'transition-transform duration-150 motion-reduce:transition-none',
+                            open && 'rtl:-rotate-90 ltr:rotate-90',
+                          )}
+                        />
+                      </AdminIconButton>
+                    ) : (
+                      <span className="grid size-11 shrink-0 place-items-center text-muted -ms-1.5" aria-hidden="true">
+                        <IconTag size={16} />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <h2 className="truncate text-[0.9375rem] font-bold text-ink">{root.name}</h2>
+                      {root.description || root.kind === 'offers' ? (
+                        <p className="truncate text-xs leading-5 text-muted">
+                          {root.kind === 'offers' ? 'قسم العروض' : root.description}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
-                </Td>
-                <Td>
-                  <AdminBadge tone="info">{countLabel(row.id)}</AdminBadge>
-                </Td>
-                <Td className="w-28 text-center text-muted tabular-nums">{row.sort_order}</Td>
-                <Td className="w-36">
-                  <EnabledBadge enabled={row.enabled} />
-                </Td>
-                <Td className="w-px text-end">
-                  <EditButton label={`تعديل ${row.name}`} onClick={() => crud.open({ ...row }, row)} />
-                </Td>
-              </Tr>
-            ))}
-          </AdminTable>
-        }
-        list={
-          <AdminList label="التصنيفات">
-            {tree.map(({ row, depth }) => (
-              <CatalogListItem
-                key={row.id}
-                title={
-                  <span style={{ paddingInlineStart: depth * 0.75 + 'rem' }}>
-                    {depth > 0 ? '└ ' : ''}
-                    {row.name}
-                  </span>
-                }
-                subtitle={row.description || undefined}
-                badges={
-                  <>
-                    <EnabledBadge enabled={row.enabled} />
-                    <AdminBadge tone="info">{countLabel(row.id)}</AdminBadge>
-                  </>
-                }
-                editLabel={`تعديل ${row.name}`}
-                onEdit={() => crud.open({ ...row }, row)}
-              />
-            ))}
-          </AdminList>
-        }
-      />
+                  {metaBadges(root, allChildren.length)}
+                  {rowActions(root)}
+                </div>
+
+                {open && children.length ? (
+                  <ul id={panelId} className="border-t border-line/80 bg-ivory/40 py-1" aria-label={`فروع ${root.name}`}>
+                    {children.map((child) => (
+                      <li
+                        key={child.id}
+                        className={cx(
+                          'flex flex-wrap items-center gap-x-3 gap-y-1 py-1 ps-6 pe-3 sm:ps-12 sm:pe-4',
+                          !child.enabled && 'opacity-75',
+                        )}
+                      >
+                        <div className="flex min-w-0 flex-1 basis-48 items-center gap-2">
+                          <span className="h-5 w-3 shrink-0 rounded-es-md border-s-2 border-b-2 border-line" aria-hidden="true" />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-ink">{child.name}</p>
+                            {child.description ? (
+                              <p className="truncate text-xs leading-5 text-muted">{child.description}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                        {metaBadges(child)}
+                        {rowActions(child)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
 
       <CatalogEditor
         crud={crud}
@@ -375,6 +546,17 @@ export function AdminCategoriesPage() {
           </div>
         ) : null}
       </CatalogEditor>
+
+      <ConfirmDialog
+        open={Boolean(confirmHide)}
+        title="إخفاء التصنيف؟"
+        body={`سيختفي «${confirmHide?.name ?? ''}» ومنتجاته من الموقع. المنتجات لا تُحذف، ويمكنك إظهاره مرة أخرى لاحقًا.`}
+        confirmLabel="إخفاء"
+        cancelLabel="رجوع"
+        busy={rowBusy}
+        onCancel={() => setConfirmHide(null)}
+        onConfirm={() => confirmHide && void setVisibility(confirmHide, false)}
+      />
 
       <ConfirmDialog
         open={confirmDelete}
