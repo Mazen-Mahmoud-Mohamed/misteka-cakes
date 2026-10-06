@@ -91,79 +91,17 @@ stable
 security definer
 set search_path = ''
 as $$
-declare
-  v_product public.products%rowtype;
-  v_category public.product_categories%rowtype;
-  v_cake public.cakes%rowtype;
-  v_size public.cake_sizes%rowtype;
 begin
-  select * into v_product from public.products where id = p_product_id;
-  if not found or v_product.enabled is distinct from true then
-    return query select false, 'invalid_product', 'المنتج المختار غير متاح.', null::text, null::numeric, false, null::text;
-    return;
-  end if;
-
-  select * into v_category from public.product_categories where id = v_product.category_id;
-  if not found or v_category.enabled is distinct from true then
-    return query select false, 'invalid_product', 'تصنيف المنتج غير متاح.', null::text, null::numeric, false, null::text;
-    return;
-  end if;
-
-  -- Reject if any ancestor category is disabled.
-  while v_category.parent_id is not null loop
-    select * into v_category from public.product_categories where id = v_category.parent_id;
-    if not found or v_category.enabled is distinct from true then
-      return query select false, 'invalid_product', 'تصنيف المنتج غير متاح.', null::text, null::numeric, false, null::text;
-      return;
-    end if;
-  end loop;
-
-  if v_product.pricing_mode = 'fixed' then
-    if v_product.fixed_price is null then
-      return query select false, 'invalid_product_price', 'سعر المنتج غير مُعد.', v_product.name, null::numeric, true, v_product.pricing_mode;
-      return;
-    end if;
-    return query select true, null::text, null::text, v_product.name, v_product.fixed_price, false, v_product.pricing_mode;
-    return;
-  end if;
-
-  -- Quote products are not payable through place_order.
-  if v_product.pricing_mode = 'quote' then
-    return query select false, 'quote_only', 'هذا المنتج يتطلب طلب سعر، وليس طلبًا مدفوعًا.', v_product.name, null::numeric, true, v_product.pricing_mode;
-    return;
-  end if;
-
-  -- cake_sizes
-  if v_product.legacy_cake_id is null then
-    return query select false, 'invalid_product', 'منتج التورت غير مربوط بمقاس.', v_product.name, null::numeric, false, v_product.pricing_mode;
-    return;
-  end if;
-
-  select * into v_cake from public.cakes where id = v_product.legacy_cake_id and enabled = true;
-  if not found then
-    return query select false, 'invalid_product', 'التورتة المرتبطة غير متاحة.', v_product.name, null::numeric, false, v_product.pricing_mode;
-    return;
-  end if;
-
-  if p_size_id is null or p_size_id = '' or p_size_id = 'custom' then
-    return query select true, null::text, null::text, v_product.name, null::numeric, true, v_product.pricing_mode;
-    return;
-  end if;
-
-  select * into v_size from public.cake_sizes where id = p_size_id and enabled = true;
-  if not found then
-    return query select false, 'invalid_size', 'المقاس المختار غير متاح.', v_product.name, null::numeric, false, v_product.pricing_mode;
-    return;
-  end if;
-
-  if v_cake.available_size_ids is not null
-     and jsonb_typeof(v_cake.available_size_ids) = 'array'
-     and not (v_cake.available_size_ids ? p_size_id) then
-    return query select false, 'invalid_size', 'المقاس غير متاح لهذا المنتج.', v_product.name, null::numeric, false, v_product.pricing_mode;
-    return;
-  end if;
-
-  return query select true, null::text, null::text, v_product.name, v_size.price, false, v_product.pricing_mode;
+  -- Thin wrapper: authoritative pricing lives in order_resolve_configured_price
+  -- (defined in product-ordering-models.sql).
+  return query
+  select r.ok, r.code, r.message, r.product_name, r.unit_price, r.pending,
+    case r.ordering_model
+      when 'cake_servings' then 'cake_sizes'
+      when 'quote' then 'quote'
+      else 'fixed'
+    end
+  from public.order_resolve_configured_price(p_product_id, p_size_id, null, 1) r;
 end;
 $$;
 
@@ -171,7 +109,7 @@ revoke all on function public.order_resolve_product_price(text, text) from publi
 revoke all on function public.order_resolve_product_price(text, text) from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- Helpers: validate option_value_ids for a product; return priced option lines
+-- Helpers: validate option_value_ids (legacy product_options + option library)
 -- ---------------------------------------------------------------------------
 
 create or replace function public.order_resolve_option_lines(
@@ -192,52 +130,23 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_id text;
-  v_value public.product_option_values%rowtype;
-  v_option public.product_options%rowtype;
+  v_ids text[] := coalesce(p_option_value_ids, array[]::text[]);
   v_lines jsonb := '[]'::jsonb;
   v_total numeric := 0;
+  v_value_id text;
+  v_legacy public.product_option_values%rowtype;
+  v_legacy_opt public.product_options%rowtype;
+  v_def_val public.option_definition_values%rowtype;
+  v_def public.option_definitions%rowtype;
+  v_link public.product_option_links%rowtype;
+  v_override public.product_option_link_value_overrides%rowtype;
+  v_price numeric;
+  v_enabled boolean;
+  v_req record;
   v_seen text[] := array[]::text[];
-  v_required record;
 begin
-  -- Reject unknown / foreign / disabled values
-  foreach v_id in array coalesce(p_option_value_ids, array[]::text[]) loop
-    if v_id = any (v_seen) then
-      continue;
-    end if;
-    v_seen := array_append(v_seen, v_id);
-
-    select * into v_value from public.product_option_values where id = v_id and enabled = true;
-    if not found then
-      return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
-      return;
-    end if;
-
-    select * into v_option from public.product_options where id = v_value.option_id and enabled = true;
-    if not found or v_option.product_id is distinct from p_product_id then
-      return query select false, 'invalid_option', 'الخيار لا ينتمي لهذا المنتج.', null::jsonb, null::numeric, false;
-      return;
-    end if;
-
-    v_total := v_total + coalesce(v_value.price_adjustment, 0);
-    v_lines := v_lines || jsonb_build_array(jsonb_build_object(
-      'line_type', 'option',
-      'product_id', p_product_id,
-      'option_id', v_option.id,
-      'option_name', v_option.name,
-      'option_value_id', v_value.id,
-      'option_value_name', v_value.name,
-      'quantity', 1,
-      'unit_price', v_value.price_adjustment,
-      'discount_amount', 0,
-      'discount_label', '',
-      'line_total', v_value.price_adjustment,
-      'product_name', ''
-    ));
-  end loop;
-
-  -- Required options must be selected
-  for v_required in
+  -- Required legacy options
+  for v_req in
     select o.id, o.name
     from public.product_options o
     where o.product_id = p_product_id and o.enabled = true and o.required = true
@@ -245,13 +154,118 @@ begin
     if not exists (
       select 1
       from public.product_option_values ov
-      where ov.option_id = v_required.id
-        and ov.enabled = true
-        and ov.id = any (coalesce(p_option_value_ids, array[]::text[]))
+      where ov.option_id = v_req.id and ov.enabled = true and ov.id = any (v_ids)
     ) then
-      return query select false, 'missing_required_option', 'اختاري: ' || v_required.name, null::jsonb, null::numeric, false;
+      return query select false, 'invalid_option', 'اختاري: ' || v_req.name, null::jsonb, null::numeric, false;
       return;
     end if;
+  end loop;
+
+  -- Required linked library definitions (non-text)
+  for v_req in
+    select l.id as link_id, d.id as def_id, d.name, d.selection_type
+    from public.product_option_links l
+    join public.option_definitions d on d.id = l.definition_id
+    where l.product_id = p_product_id and l.enabled = true and d.enabled = true and l.required = true
+      and d.selection_type in ('toggle', 'single', 'multi', 'quantity')
+  loop
+    if not exists (
+      select 1
+      from public.option_definition_values dv
+      where dv.definition_id = v_req.def_id and dv.enabled = true and dv.id = any (v_ids)
+    ) then
+      return query select false, 'invalid_option', 'اختاري: ' || v_req.name, null::jsonb, null::numeric, false;
+      return;
+    end if;
+  end loop;
+
+  foreach v_value_id in array v_ids
+  loop
+    if v_value_id = any (v_seen) then
+      continue;
+    end if;
+    v_seen := array_append(v_seen, v_value_id);
+
+    -- Legacy product-scoped option value
+    select * into v_legacy from public.product_option_values where id = v_value_id;
+    if found then
+      if v_legacy.enabled is distinct from true then
+        return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
+        return;
+      end if;
+      select * into v_legacy_opt from public.product_options where id = v_legacy.option_id;
+      if not found or v_legacy_opt.product_id is distinct from p_product_id or v_legacy_opt.enabled is distinct from true then
+        return query select false, 'invalid_option', 'الخيار لا ينتمي لهذا المنتج.', null::jsonb, null::numeric, false;
+        return;
+      end if;
+      v_lines := v_lines || jsonb_build_array(jsonb_build_object(
+        'line_type', 'option',
+        'product_id', p_product_id,
+        'option_id', v_legacy_opt.id,
+        'option_name', v_legacy_opt.name,
+        'option_value_id', v_legacy.id,
+        'option_value_name', v_legacy.name,
+        'quantity', 1,
+        'unit_price', v_legacy.price_adjustment,
+        'discount_amount', 0,
+        'discount_label', '',
+        'line_total', v_legacy.price_adjustment,
+        'product_name', ''
+      ));
+      v_total := v_total + coalesce(v_legacy.price_adjustment, 0);
+      continue;
+    end if;
+
+    -- Library definition value
+    select * into v_def_val from public.option_definition_values where id = v_value_id;
+    if not found then
+      return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
+      return;
+    end if;
+    if v_def_val.enabled is distinct from true then
+      return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
+      return;
+    end if;
+    select * into v_def from public.option_definitions where id = v_def_val.definition_id;
+    if not found or v_def.enabled is distinct from true then
+      return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
+      return;
+    end if;
+    select * into v_link from public.product_option_links
+    where product_id = p_product_id and definition_id = v_def.id and enabled = true;
+    if not found then
+      return query select false, 'invalid_option', 'الخيار لا ينتمي لهذا المنتج.', null::jsonb, null::numeric, false;
+      return;
+    end if;
+    v_price := v_def_val.price_adjustment;
+    v_enabled := true;
+    select * into v_override from public.product_option_link_value_overrides
+    where link_id = v_link.id and definition_value_id = v_def_val.id;
+    if found then
+      v_price := v_override.price_adjustment;
+      if v_override.enabled is not null then
+        v_enabled := v_override.enabled;
+      end if;
+    end if;
+    if not v_enabled then
+      return query select false, 'invalid_option', 'خيار غير صالح.', null::jsonb, null::numeric, false;
+      return;
+    end if;
+    v_lines := v_lines || jsonb_build_array(jsonb_build_object(
+      'line_type', 'option',
+      'product_id', p_product_id,
+      'option_id', v_def.id,
+      'option_name', v_def.name,
+      'option_value_id', v_def_val.id,
+      'option_value_name', v_def_val.name,
+      'quantity', 1,
+      'unit_price', v_price,
+      'discount_amount', 0,
+      'discount_label', '',
+      'line_total', v_price,
+      'product_name', ''
+    ));
+    v_total := v_total + coalesce(v_price, 0);
   end loop;
 
   return query select true, null::text, null::text, v_lines, v_total, false;
@@ -300,6 +314,7 @@ declare
 
   v_product_id text := nullif(trim(coalesce(payload->>'product_id', '')), '');
   v_quantity integer := null;
+  v_price_tier_id text := nullif(trim(coalesce(payload->>'price_tier_id', '')), '');
   v_option_value_ids text[] := coalesce(
     array(
       select distinct x
@@ -309,6 +324,9 @@ declare
   );
   v_offer_id text := nullif(trim(coalesce(payload->>'offer_id', '')), '');
   v_offer_selections jsonb := coalesce(payload->'offer_selections', '[]'::jsonb);
+  v_ordering_model text := null;
+  v_tier_label text := null;
+  v_line_qty integer := 1;
 
   v_min_advance_days integer := 3;
   v_today_cairo date := (timezone('Africa/Cairo', now()))::date;
@@ -390,8 +408,16 @@ begin
     return jsonb_build_object('ok', false, 'code', 'invalid_service', 'message', 'اختاري التوصيل أو الاستلام.');
   end if;
 
-  if v_servings is null or v_servings < 1 or v_servings > 999 then
-    return jsonb_build_object('ok', false, 'code', 'invalid_servings', 'message', 'اكتبي عدد الأفراد بالأرقام.');
+  -- Servings required for cake orders only. Product/offer paths default to 1.
+  if v_order_kind = 'cake' then
+    if v_servings is null or v_servings < 1 or v_servings > 999 then
+      return jsonb_build_object('ok', false, 'code', 'invalid_servings', 'message', 'اكتبي عدد الأفراد بالأرقام.');
+    end if;
+  else
+    v_servings := coalesce(v_servings, 1);
+    if v_servings < 1 or v_servings > 999 then
+      v_servings := 1;
+    end if;
   end if;
 
   if v_event_date is null then
@@ -451,31 +477,34 @@ begin
       when others then
         return jsonb_build_object('ok', false, 'code', 'invalid_quantity', 'message', 'الكمية غير صالحة.');
     end;
-    if v_quantity is null or v_quantity < 1 or v_quantity > 99 then
+    if v_quantity is null or v_quantity < 1 or v_quantity > 999 then
       return jsonb_build_object('ok', false, 'code', 'invalid_quantity', 'message', 'الكمية غير صالحة.');
     end if;
 
-    -- Ignore any client prices: resolve from DB
-    select r.ok, r.code, r.message, r.product_name, r.unit_price, r.pending, r.pricing_mode
-      into v_price_ok, v_price_code, v_price_msg, v_product_name_snap, v_unit, v_pending_price, v_pricing_mode
-    from public.order_resolve_product_price(v_product_id, nullif(v_size_id, '')) r;
+    -- Ignore client prices: resolve from ordering_model + tiers
+    select r.ok, r.code, r.message, r.product_name, r.unit_price, r.line_qty, r.pending, r.ordering_model, r.tier_id, r.tier_label, r.size_label
+      into v_price_ok, v_price_code, v_price_msg, v_product_name_snap, v_unit, v_line_qty, v_pending_price, v_ordering_model, v_price_tier_id, v_tier_label, v_size_label
+    from public.order_resolve_configured_price(
+      v_product_id,
+      nullif(v_size_id, ''),
+      v_price_tier_id,
+      v_quantity
+    ) r;
 
     if not v_price_ok then
       return jsonb_build_object('ok', false, 'code', v_price_code, 'message', v_price_msg);
     end if;
 
-    -- Cake-sized catalog products must send a real size_id (no silent pending from missing size).
-    if v_pricing_mode = 'cake_sizes' and (v_size_id is null or v_size_id = '' or v_size_id = 'custom') then
-      return jsonb_build_object('ok', false, 'code', 'invalid_size', 'message', 'اختاري المقاس.');
-    end if;
-    if v_pricing_mode = 'cake_sizes' and v_pending_price then
-      return jsonb_build_object('ok', false, 'code', 'invalid_size', 'message', 'المقاس المختار غير متاح.');
-    end if;
-
-    -- Never create a paid order with an unknown product base price (includes quote rejection via helper).
     if v_pending_price or v_unit is null then
       return jsonb_build_object('ok', false, 'code', coalesce(v_price_code, 'invalid_product_price'), 'message', coalesce(v_price_msg, 'سعر المنتج غير مُعد.'));
     end if;
+
+    v_quantity := coalesce(v_line_qty, v_quantity);
+    v_pricing_mode := case v_ordering_model
+      when 'cake_servings' then 'cake_sizes'
+      when 'quote' then 'quote'
+      else 'fixed'
+    end;
 
     select o.ok, o.code, o.message, o.lines, o.options_total, o.pending
       into v_opt_ok, v_opt_code, v_opt_msg, v_opt_lines, v_opt_total, v_opt_pending
@@ -485,24 +514,53 @@ begin
       return jsonb_build_object('ok', false, 'code', v_opt_code, 'message', v_opt_msg);
     end if;
 
-    v_base_price := v_unit * v_quantity;
+    -- Package/weight/fixed: unit_price is the line total; quantity models use unit × qty
+    if v_ordering_model in ('quantity', 'custom') and coalesce(v_price_tier_id, '') <> ''
+       and exists (
+         select 1 from public.product_price_tiers t
+         where t.id = v_price_tier_id and t.tier_kind = 'package'
+       ) then
+      v_base_price := v_unit;
+      v_quantity := coalesce((select package_qty from public.product_price_tiers where id = v_price_tier_id), v_quantity);
+      v_line_qty := 1; -- option multiplier: once per package order
+    elsif v_ordering_model = 'weight' then
+      v_base_price := v_unit;
+      v_line_qty := 1;
+      v_quantity := 1;
+    elsif v_ordering_model = 'fixed_item' then
+      v_base_price := v_unit;
+      v_line_qty := 1;
+      v_quantity := 1;
+    elsif v_ordering_model = 'cake_servings' then
+      v_base_price := v_unit;
+      v_line_qty := 1;
+      v_quantity := 1;
+    else
+      v_base_price := v_unit * v_quantity;
+      v_line_qty := v_quantity;
+    end if;
+
     v_total_price := v_base_price;
     v_price_lines := v_price_lines || jsonb_build_array(jsonb_build_object(
       'id', 'base',
-      'label', v_product_name_snap || case when v_quantity > 1 then ' × ' || v_quantity else '' end,
+      'label', v_product_name_snap || case
+        when v_tier_label is not null and v_tier_label <> '' then ' — ' || v_tier_label
+        when v_line_qty > 1 then ' × ' || v_line_qty
+        else ''
+      end,
       'amount', v_base_price,
       'status', 'known'
     ));
 
     if v_opt_total > 0 then
-      v_extras_price := v_opt_total * v_quantity;
+      v_extras_price := v_opt_total * v_line_qty;
       v_total_price := v_total_price + v_extras_price;
       for v_item in select * from jsonb_array_elements(v_opt_lines)
       loop
         v_price_lines := v_price_lines || jsonb_build_array(jsonb_build_object(
           'id', v_item->>'option_value_id',
           'label', (v_item->>'option_name') || ': ' || (v_item->>'option_value_name'),
-          'amount', (v_item->>'line_total')::numeric * v_quantity,
+          'amount', (v_item->>'line_total')::numeric * v_line_qty,
           'status', 'known'
         ));
       end loop;
@@ -522,8 +580,8 @@ begin
     v_custom_design := false;
     v_cake_id := null;
     v_cake_name := v_product_name_snap;
-    v_size_id := coalesce(nullif(v_size_id, ''), 'custom');
-    v_size_label := case when v_pricing_mode = 'cake_sizes' and v_size_id <> 'custom' then coalesce((select label from public.cake_sizes where id = v_size_id), 'منتج') else 'منتج' end;
+    v_size_id := coalesce(nullif(v_size_id, ''), coalesce(v_price_tier_id, 'custom'));
+    v_size_label := coalesce(nullif(v_size_label, ''), coalesce(v_tier_label, 'منتج'));
     v_filling_id := 'none';
     select * into v_filling from public.fillings where id = 'none';
     if not found then
@@ -560,12 +618,17 @@ begin
     end;
 
     v_sort := 0;
-    v_line_total := v_unit * v_quantity;
+    v_line_total := v_base_price;
     insert into public.order_items (
       id, order_id, line_type, product_id, product_name, quantity, unit_price, discount_amount, line_total, sort_order, meta
     ) values (
-      v_id || '-line-' || v_sort, v_id, 'product', v_product_id, v_product_name_snap, v_quantity, v_unit, 0, v_line_total, v_sort,
-      jsonb_build_object('pricing_mode', v_pricing_mode, 'size_id', v_size_id)
+      v_id || '-line-' || v_sort, v_id, 'product', v_product_id, v_product_name_snap, greatest(v_quantity, 1), v_unit, 0, v_line_total, v_sort,
+      jsonb_build_object(
+        'ordering_model', v_ordering_model,
+        'price_tier_id', v_price_tier_id,
+        'tier_label', v_tier_label,
+        'size_id', v_size_id
+      )
     );
     v_sort := v_sort + 1;
     for v_item in select * from jsonb_array_elements(v_opt_lines)
@@ -576,7 +639,7 @@ begin
       ) values (
         v_id || '-line-' || v_sort, v_id, 'option', v_product_id, v_product_name_snap,
         v_item->>'option_id', v_item->>'option_name', v_item->>'option_value_id', v_item->>'option_value_name',
-        v_quantity, (v_item->>'unit_price')::numeric, 0, (v_item->>'line_total')::numeric * v_quantity, v_sort
+        greatest(v_quantity, 1), (v_item->>'unit_price')::numeric, 0, (v_item->>'line_total')::numeric * greatest(v_quantity, 1), v_sort
       );
       v_sort := v_sort + 1;
     end loop;
@@ -595,7 +658,8 @@ begin
         'basePrice', v_base_price, 'extrasPrice', v_extras_price, 'deliveryPrice', v_delivery_price,
         'totalPrice', v_total_price, 'pendingCharges', to_jsonb(v_pending), 'priceLines', v_price_lines,
         'status', 'pending_review', 'createdAt', now(),
-        'orderKind', 'product', 'productId', v_product_id, 'offerId', null, 'offerName', null
+        'orderKind', 'product', 'productId', v_product_id, 'offerId', null, 'offerName', null,
+        'quantity', v_quantity, 'priceTierId', v_price_tier_id, 'orderingModel', v_ordering_model
       )
     );
   end if;

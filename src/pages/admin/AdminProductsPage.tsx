@@ -24,28 +24,40 @@ import {
 import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
 import { IconCake, IconImage, IconPlus, IconRefresh } from '@/components/admin/icons'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { Link } from 'react-router-dom'
 import {
-  deleteAdminOptionValue,
   deleteAdminProduct,
-  deleteAdminProductOption,
+  deleteAdminProductOptionLink,
+  deleteAdminProductPriceTier,
   deleteCatalogMedia,
   generateId,
-  listAdminOptionValues,
+  listAdminOptionDefinitions,
   listAdminProductCategories,
-  listAdminProductOptions,
+  listAdminProductOptionLinks,
+  listAdminProductPriceTiers,
   listAdminProducts,
   uploadCatalogMedia,
-  upsertAdminOptionValue,
   upsertAdminProduct,
-  upsertAdminProductOption,
+  upsertAdminProductOptionLink,
+  upsertAdminProductPriceTier,
+  type AdminOptionDefinitionRow,
   type AdminProductCategoryRow,
-  type AdminProductOptionRow,
-  type AdminProductOptionValueRow,
+  type AdminProductOptionLinkRow,
+  type AdminProductPriceTierRow,
   type AdminProductRow,
 } from '@/services/admin/adminProductService'
-import type { ProductOptionSelection, ProductPricingMode } from '@/types/products'
+import type { ProductOrderingModel, ProductPriceTierKind, ProductPricingMode } from '@/types/products'
 import { formatEgp } from '@/utils/format'
 import { cx } from '@/utils/cx'
+
+const ORDERING_LABELS: Record<ProductOrderingModel, string> = {
+  cake_servings: 'بعدد الأفراد / مقاس التورت',
+  quantity: 'بالكمية / باكدجات',
+  fixed_item: 'سعر ثابت للقطعة',
+  weight: 'بالوزن',
+  quote: 'اطلب السعر',
+  custom: 'مخصص',
+}
 
 const PRICING_LABELS: Record<ProductPricingMode, string> = {
   cake_sizes: 'حسب مقاس التورت',
@@ -53,10 +65,17 @@ const PRICING_LABELS: Record<ProductPricingMode, string> = {
   quote: 'عند التأكيد',
 }
 
-const SELECTION_LABELS: Record<ProductOptionSelection, string> = {
-  toggle: 'تشغيل / إيقاف',
-  single: 'اختيار واحد',
-  multi: 'اختيار متعدد',
+const TIER_KIND_LABELS: Record<ProductPriceTierKind, string> = {
+  package: 'باكدج ثابت',
+  quantity_range: 'شريحة كمية',
+  weight: 'وزن',
+  unit: 'وحدة',
+}
+
+function pricingModeFromOrdering(mode: ProductOrderingModel): ProductPricingMode {
+  if (mode === 'cake_servings') return 'cake_sizes'
+  if (mode === 'quote') return 'quote'
+  return 'fixed'
 }
 
 const emptyProduct: AdminProductRow = {
@@ -65,31 +84,29 @@ const emptyProduct: AdminProductRow = {
   description: '',
   category_id: '',
   pricing_mode: 'fixed',
+  ordering_model: 'fixed_item',
   fixed_price: null,
   price_note: '',
   legacy_cake_id: null,
+  qty_min: 1,
+  qty_max: 99,
+  qty_step: 1,
   image_key: '',
   image_alt: '',
   sort_order: 100,
   enabled: true,
 }
 
-const emptyOption = (productId: string, sort: number): AdminProductOptionRow => ({
+const emptyTier = (productId: string, kind: ProductPriceTierKind, sort: number): AdminProductPriceTierRow => ({
   id: '',
   product_id: productId,
-  name: '',
-  description: '',
-  selection_type: 'single',
-  required: false,
-  sort_order: sort,
-  enabled: true,
-})
-
-const emptyValue = (optionId: string, sort: number): AdminProductOptionValueRow => ({
-  id: '',
-  option_id: optionId,
-  name: '',
-  price_adjustment: 0,
+  tier_kind: kind,
+  label: '',
+  package_qty: kind === 'package' ? 6 : null,
+  qty_min: kind === 'quantity_range' ? 1 : null,
+  qty_max: kind === 'quantity_range' ? 5 : null,
+  weight_grams: kind === 'weight' ? 500 : null,
+  price: 0,
   sort_order: sort,
   enabled: true,
 })
@@ -228,54 +245,305 @@ function leafCategoryIds(categories: AdminProductCategoryRow[]): Set<string> {
   return new Set(categories.filter((c) => c.kind !== 'offers' && !parents.has(c.id)).map((c) => c.id))
 }
 
-function OptionSection({
+function PriceTierSection({
+  productId,
+  orderingModel,
+}: {
+  productId: string
+  orderingModel: ProductOrderingModel
+}) {
+  const [tiers, setTiers] = useState<AdminProductPriceTierRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [draft, setDraft] = useState<AdminProductPriceTierRow | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [busyDelete, setBusyDelete] = useState(false)
+  const tierIds = useRef<string[]>([])
+
+  const showPackages = orderingModel === 'quantity' || orderingModel === 'custom'
+  const showWeight = orderingModel === 'weight'
+  const showRanges = orderingModel === 'quantity' || orderingModel === 'custom'
+  const showSection = showPackages || showWeight || showRanges
+
+  async function reload() {
+    setLoading(true)
+    setError('')
+    const res = await listAdminProductPriceTiers(productId)
+    if (res.error) {
+      setError(res.error)
+      setTiers([])
+    } else {
+      setTiers(res.data ?? [])
+      tierIds.current = (res.data ?? []).map((t) => t.id)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    if (!showSection) return
+    void reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, showSection])
+
+  async function save() {
+    if (!draft) return
+    if (!draft.label.trim()) {
+      setMessage('أدخلي تسمية الشريحة.')
+      return
+    }
+    if (!(Number(draft.price) >= 0)) {
+      setMessage('أدخلي سعرًا صالحًا.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    const payload: AdminProductPriceTierRow = {
+      ...draft,
+      id: draft.id || generateId(draft.label, 'tier', tierIds.current),
+      label: draft.label.trim(),
+      price: Number(draft.price) || 0,
+      package_qty: draft.tier_kind === 'package' ? Number(draft.package_qty) || null : null,
+      qty_min: draft.tier_kind === 'quantity_range' ? Number(draft.qty_min) || null : null,
+      qty_max: draft.tier_kind === 'quantity_range' ? Number(draft.qty_max) || null : null,
+      weight_grams: draft.tier_kind === 'weight' ? Number(draft.weight_grams) || null : null,
+      sort_order: Number(draft.sort_order) || 0,
+    }
+    const result = await upsertAdminProductPriceTier(payload)
+    setSaving(false)
+    if (!result.ok) {
+      setMessage(result.message)
+      return
+    }
+    setMessage(result.message)
+    setDraft(null)
+    await reload()
+  }
+
+  async function runDelete() {
+    if (!confirmId) return
+    setBusyDelete(true)
+    const result = await deleteAdminProductPriceTier(confirmId)
+    setBusyDelete(false)
+    setConfirmId(null)
+    setMessage(result.message)
+    if (result.ok) await reload()
+  }
+
+  function startNew(kind: ProductPriceTierKind) {
+    const sort = Math.max(0, ...tiers.map((t) => t.sort_order)) + 10
+    setDraft(emptyTier(productId, kind, sort))
+    setMessage('')
+  }
+
+  if (!showSection) return null
+
+  return (
+    <section className="grid gap-4 border-t border-line pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-ink">شرائح التسعير</h3>
+        <div className="flex flex-wrap gap-2">
+          {showPackages ? (
+            <AdminButton
+              size="sm"
+              variant="secondary"
+              icon={<IconPlus size={16} />}
+              disabled={Boolean(draft)}
+              onClick={() => startNew('package')}
+            >
+              باكدج
+            </AdminButton>
+          ) : null}
+          {showRanges ? (
+            <AdminButton
+              size="sm"
+              variant="secondary"
+              icon={<IconPlus size={16} />}
+              disabled={Boolean(draft)}
+              onClick={() => startNew('quantity_range')}
+            >
+              شريحة كمية
+            </AdminButton>
+          ) : null}
+          {showWeight ? (
+            <AdminButton
+              size="sm"
+              variant="secondary"
+              icon={<IconPlus size={16} />}
+              disabled={Boolean(draft)}
+              onClick={() => startNew('weight')}
+            >
+              وزن
+            </AdminButton>
+          ) : null}
+        </div>
+      </div>
+      <p className="text-[0.8125rem] leading-6 text-muted">
+        الباكدجات تظهر للعميل كخيارات جاهزة (مثل 6 / 12 / 24). شرائح الكمية تُسعّر حسب المدى. الأوزان تظهر كخيارات وزن
+        فقط.
+      </p>
+      {loading ? <p className="text-sm text-muted">جارٍ تحميل الشرائح...</p> : null}
+      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+      {message ? <AdminAlert tone={message.includes('تعذّر') ? 'error' : 'success'}>{message}</AdminAlert> : null}
+      {!loading && tiers.length === 0 && !draft ? (
+        <p className="text-[0.8125rem] text-muted">لا توجد شرائح بعد. أضيفي باكدجًا أو وزنًا حسب طريقة البيع.</p>
+      ) : null}
+      <div className="grid gap-2">
+        {tiers.map((tier) => (
+          <div
+            key={tier.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-ivory/40 px-3 py-2"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink">
+                {tier.label} <span className="font-normal text-muted">· {TIER_KIND_LABELS[tier.tier_kind]}</span>
+              </p>
+              <p className="text-[0.8125rem] text-muted">
+                {formatEgp(tier.price)}
+                {tier.package_qty ? ` · ${tier.package_qty} قطعة` : ''}
+                {tier.weight_grams ? ` · ${tier.weight_grams} جم` : ''}
+                {tier.tier_kind === 'quantity_range' ? ` · من ${tier.qty_min ?? '?'} إلى ${tier.qty_max ?? '∞'}` : ''}
+                {!tier.enabled ? ' · مخفي' : ''}
+              </p>
+            </div>
+            <div className="flex gap-1.5">
+              <AdminButton size="sm" onClick={() => setDraft({ ...tier })}>
+                تعديل
+              </AdminButton>
+              <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmId(tier.id)}>
+                حذف
+              </AdminButton>
+            </div>
+          </div>
+        ))}
+      </div>
+      {draft ? (
+        <div className="grid gap-3 rounded-lg border border-line bg-ivory/40 p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AdminTextField
+              id="tier-label"
+              label="التسمية"
+              required
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+            />
+            <AdminTextField
+              id="tier-price"
+              label="السعر"
+              required
+              type="number"
+              inputMode="decimal"
+              dir="ltr"
+              className="text-start"
+              value={String(draft.price)}
+              onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })}
+            />
+            {draft.tier_kind === 'package' ? (
+              <AdminTextField
+                id="tier-pkg"
+                label="عدد القطع"
+                type="number"
+                value={String(draft.package_qty ?? '')}
+                onChange={(e) => setDraft({ ...draft, package_qty: Number(e.target.value) || null })}
+              />
+            ) : null}
+            {draft.tier_kind === 'weight' ? (
+              <AdminTextField
+                id="tier-weight"
+                label="الوزن (جرام)"
+                type="number"
+                value={String(draft.weight_grams ?? '')}
+                onChange={(e) => setDraft({ ...draft, weight_grams: Number(e.target.value) || null })}
+              />
+            ) : null}
+            {draft.tier_kind === 'quantity_range' ? (
+              <>
+                <AdminTextField
+                  id="tier-qmin"
+                  label="من كمية"
+                  type="number"
+                  value={String(draft.qty_min ?? '')}
+                  onChange={(e) => setDraft({ ...draft, qty_min: Number(e.target.value) || null })}
+                />
+                <AdminTextField
+                  id="tier-qmax"
+                  label="إلى كمية"
+                  type="number"
+                  value={String(draft.qty_max ?? '')}
+                  onChange={(e) => setDraft({ ...draft, qty_max: Number(e.target.value) || null })}
+                />
+              </>
+            ) : null}
+            <AdminTextField
+              id="tier-sort"
+              label="الترتيب"
+              type="number"
+              value={String(draft.sort_order)}
+              onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
+            />
+          </div>
+          <AdminSwitch
+            id="tier-enabled"
+            label="ظاهر للعملاء"
+            checked={draft.enabled}
+            onChange={(enabled) => setDraft({ ...draft, enabled })}
+          />
+          <div className="flex flex-wrap gap-2">
+            <AdminButton size="sm" variant="primary" loading={saving} onClick={() => void save()}>
+              حفظ الشريحة
+            </AdminButton>
+            <AdminButton size="sm" disabled={saving} onClick={() => setDraft(null)}>
+              إلغاء
+            </AdminButton>
+          </div>
+        </div>
+      ) : null}
+      <ConfirmDialog
+        open={Boolean(confirmId)}
+        title="حذف الشريحة؟"
+        body="سيتم حذف شريحة التسعير نهائيًا."
+        confirmLabel="حذف"
+        cancelLabel="رجوع"
+        danger
+        busy={busyDelete}
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => void runDelete()}
+      />
+    </section>
+  )
+}
+
+function OptionLinkSection({
   productId,
   isCakeLinked,
 }: {
   productId: string
   isCakeLinked: boolean
 }) {
-  const [options, setOptions] = useState<AdminProductOptionRow[]>([])
-  const [valuesByOption, setValuesByOption] = useState<Record<string, AdminProductOptionValueRow[]>>({})
+  const [links, setLinks] = useState<AdminProductOptionLinkRow[]>([])
+  const [library, setLibrary] = useState<AdminOptionDefinitionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [optionDraft, setOptionDraft] = useState<AdminProductOptionRow | null>(null)
-  const [optionOriginal, setOptionOriginal] = useState<AdminProductOptionRow | null>(null)
-  const [valueDraft, setValueDraft] = useState<AdminProductOptionValueRow | null>(null)
-  const [savingOption, setSavingOption] = useState(false)
-  const [savingValue, setSavingValue] = useState(false)
-  const [confirmOptionId, setConfirmOptionId] = useState<string | null>(null)
-  const [confirmValueId, setConfirmValueId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<AdminProductOptionLinkRow | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
   const [busyDelete, setBusyDelete] = useState(false)
-  const optionIds = useRef<string[]>([])
-  const valueIds = useRef<Record<string, string[]>>({})
+  const [attachId, setAttachId] = useState('')
+  const linkIds = useRef<string[]>([])
 
   async function reload() {
     setLoading(true)
     setError('')
-    const optsRes = await listAdminProductOptions(productId)
-    if (optsRes.error) {
-      setError(optsRes.error)
-      setOptions([])
-      setValuesByOption({})
-      setLoading(false)
-      return
-    }
-    const opts = optsRes.data ?? []
-    setOptions(opts)
-    optionIds.current = opts.map((o) => o.id)
-    const nextValues: Record<string, AdminProductOptionValueRow[]> = {}
-    const nextValueIds: Record<string, string[]> = {}
-    await Promise.all(
-      opts.map(async (opt) => {
-        const res = await listAdminOptionValues(opt.id)
-        nextValues[opt.id] = res.data ?? []
-        nextValueIds[opt.id] = (res.data ?? []).map((v) => v.id)
-      }),
-    )
-    setValuesByOption(nextValues)
-    valueIds.current = nextValueIds
+    const [linksRes, libRes] = await Promise.all([
+      listAdminProductOptionLinks(productId),
+      listAdminOptionDefinitions(),
+    ])
+    if (linksRes.error) setError(linksRes.error)
+    setLinks(linksRes.data ?? [])
+    linkIds.current = (linksRes.data ?? []).map((l) => l.id)
+    setLibrary(libRes.data ?? [])
     setLoading(false)
   }
 
@@ -283,80 +551,6 @@ function OptionSection({
     void reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId])
-
-  async function saveOption() {
-    if (!optionDraft) return
-    if (!optionDraft.name.trim()) {
-      setMessage('أدخلي اسم الخيار.')
-      return
-    }
-    setSavingOption(true)
-    setMessage('')
-    const payload: AdminProductOptionRow = {
-      ...optionDraft,
-      id: optionDraft.id || generateId(optionDraft.name, 'opt', optionIds.current),
-      name: optionDraft.name.trim(),
-      description: optionDraft.description.trim(),
-      sort_order: Number(optionDraft.sort_order) || 0,
-    }
-    const result = await upsertAdminProductOption(payload)
-    setSavingOption(false)
-    if (!result.ok) {
-      setMessage(result.message)
-      return
-    }
-    setMessage(result.message)
-    setOptionDraft(null)
-    setOptionOriginal(null)
-    await reload()
-  }
-
-  async function saveValue() {
-    if (!valueDraft) return
-    if (!valueDraft.name.trim()) {
-      setMessage('أدخلي اسم القيمة.')
-      return
-    }
-    setSavingValue(true)
-    setMessage('')
-    const taken = valueIds.current[valueDraft.option_id] ?? []
-    const payload: AdminProductOptionValueRow = {
-      ...valueDraft,
-      id: valueDraft.id || generateId(valueDraft.name, 'val', taken),
-      name: valueDraft.name.trim(),
-      price_adjustment: Number(valueDraft.price_adjustment) || 0,
-      sort_order: Number(valueDraft.sort_order) || 0,
-    }
-    const result = await upsertAdminOptionValue(payload)
-    setSavingValue(false)
-    if (!result.ok) {
-      setMessage(result.message)
-      return
-    }
-    setMessage(result.message)
-    setValueDraft(null)
-    await reload()
-  }
-
-  async function runDeleteOption() {
-    if (!confirmOptionId) return
-    setBusyDelete(true)
-    const result = await deleteAdminProductOption(confirmOptionId)
-    setBusyDelete(false)
-    setConfirmOptionId(null)
-    setMessage(result.message)
-    if (result.ok) await reload()
-  }
-
-  async function runDeleteValue() {
-    if (!confirmValueId) return
-    setBusyDelete(true)
-    const result = await deleteAdminOptionValue(confirmValueId)
-    setBusyDelete(false)
-    setConfirmValueId(null)
-    setMessage(result.message)
-    if (result.ok) await reload()
-  }
 
   if (isCakeLinked) {
     return (
@@ -367,324 +561,188 @@ function OptionSection({
     )
   }
 
+  const linkedDefs = new Set(links.map((l) => l.definition_id))
+  const available = library.filter((d) => d.enabled && !linkedDefs.has(d.id))
+
+  async function attach() {
+    if (!attachId) {
+      setMessage('اختاري خيارًا من المكتبة.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    const sort = Math.max(0, ...links.map((l) => l.sort_order)) + 10
+    const row: AdminProductOptionLinkRow = {
+      id: generateId(attachId, 'plink', linkIds.current),
+      product_id: productId,
+      definition_id: attachId,
+      required: false,
+      sort_order: sort,
+      enabled: true,
+    }
+    const result = await upsertAdminProductOptionLink(row)
+    setSaving(false)
+    setMessage(result.message)
+    if (result.ok) {
+      setAttachId('')
+      await reload()
+    }
+  }
+
+  async function saveDraft() {
+    if (!draft) return
+    setSaving(true)
+    setMessage('')
+    const result = await upsertAdminProductOptionLink({
+      ...draft,
+      sort_order: Number(draft.sort_order) || 0,
+    })
+    setSaving(false)
+    setMessage(result.message)
+    if (result.ok) {
+      setDraft(null)
+      await reload()
+    }
+  }
+
+  async function runDelete() {
+    if (!confirmId) return
+    setBusyDelete(true)
+    const result = await deleteAdminProductOptionLink(confirmId)
+    setBusyDelete(false)
+    setConfirmId(null)
+    setMessage(result.message)
+    if (result.ok) await reload()
+  }
+
+  function defName(id: string) {
+    return library.find((d) => d.id === id)?.name ?? id
+  }
+
   return (
     <section className="grid gap-4 border-t border-line pt-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-ink">الخيارات</h3>
+        <h3 className="text-sm font-bold text-ink">الخيارات (من المكتبة)</h3>
+        <Link
+          to="/admin/options"
+          className="text-[0.8125rem] font-semibold text-rose-deep underline-offset-2 hover:underline"
+        >
+          إدارة مكتبة الخيارات
+        </Link>
+      </div>
+      <p className="text-[0.8125rem] leading-6 text-muted">
+        اربطي خيارات قابلة لإعادة الاستخدام (مثل النكهة أو عجينة السكر) دون تكرار تعريفها لكل منتج.
+      </p>
+      {loading ? <p className="text-sm text-muted">جارٍ تحميل الخيارات...</p> : null}
+      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+      {message ? (
+        <AdminAlert tone={message.includes('تعذّر') || message.includes('اختاري') ? 'error' : 'success'}>
+          {message}
+        </AdminAlert>
+      ) : null}
+      <div className="flex flex-wrap items-end gap-2">
+        <AdminSelectField
+          id="attach-option"
+          label="ربط خيار من المكتبة"
+          value={attachId}
+          onChange={(e) => setAttachId(e.target.value)}
+          wrapperClassName="min-w-[14rem] flex-1"
+        >
+          <option value="">— اختاري —</option>
+          {available.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </AdminSelectField>
         <AdminButton
           size="sm"
           variant="secondary"
-          icon={<IconPlus size={16} />}
-          disabled={loading || Boolean(optionDraft)}
-          onClick={() => {
-            const sort = Math.max(0, ...options.map((o) => o.sort_order)) + 10
-            setOptionOriginal(null)
-            setOptionDraft(emptyOption(productId, sort))
-            setValueDraft(null)
-            setMessage('')
-          }}
+          loading={saving && !draft}
+          disabled={!attachId}
+          onClick={() => void attach()}
         >
-          إضافة خيار
+          ربط
         </AdminButton>
       </div>
-
-      {loading ? <p className="text-sm text-muted">جارٍ تحميل الخيارات...</p> : null}
-      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
-      {message ? <AdminAlert tone={message.includes('تعذّر') || message.includes('لا يمكن') ? 'error' : 'success'}>{message}</AdminAlert> : null}
-
-      {!loading && !error && options.length === 0 && !optionDraft ? (
-        <p className="text-[0.8125rem] text-muted">لا توجد خيارات لهذا المنتج بعد.</p>
+      {!loading && links.length === 0 ? (
+        <p className="text-[0.8125rem] text-muted">
+          لا توجد خيارات مربوطة. أنشئيها من مكتبة الخيارات ثم اربطيها هنا.
+        </p>
       ) : null}
-
-      <div className="grid gap-3">
-        {options.map((opt) => {
-          const values = valuesByOption[opt.id] ?? []
-          const editingThis = optionDraft?.id === opt.id && optionOriginal
+      <div className="grid gap-2">
+        {links.map((link) => {
+          const editing = draft?.id === link.id
           return (
-            <div key={opt.id} className="grid gap-3 rounded-lg border border-line bg-ivory/40 p-3">
-              {editingThis && optionDraft ? (
-                <OptionForm
-                  draft={optionDraft}
-                  onChange={setOptionDraft}
-                  saving={savingOption}
-                  onSave={() => void saveOption()}
-                  onCancel={() => {
-                    setOptionDraft(null)
-                    setOptionOriginal(null)
-                  }}
-                />
-              ) : (
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-bold text-ink">{opt.name}</p>
-                    <p className="text-xs text-muted">
-                      {SELECTION_LABELS[opt.selection_type]}
-                      {opt.required ? ' · مطلوب' : ''}
-                      {!opt.enabled ? ' · مخفي' : ''}
-                    </p>
-                    {opt.description ? <p className="mt-1 text-xs text-muted">{opt.description}</p> : null}
-                  </div>
+            <div key={link.id} className="rounded-lg border border-line bg-ivory/40 p-3">
+              {editing && draft ? (
+                <div className="grid gap-3">
+                  <p className="text-sm font-semibold text-ink">{defName(draft.definition_id)}</p>
+                  <AdminTextField
+                    id="link-sort"
+                    label="الترتيب"
+                    type="number"
+                    value={String(draft.sort_order)}
+                    onChange={(e) => setDraft({ ...draft, sort_order: Number(e.target.value) })}
+                  />
+                  <AdminSwitch
+                    id="link-required"
+                    label="مطلوب"
+                    checked={draft.required}
+                    onChange={(required) => setDraft({ ...draft, required })}
+                  />
+                  <AdminSwitch
+                    id="link-enabled"
+                    label="مفعّل لهذا المنتج"
+                    checked={draft.enabled}
+                    onChange={(enabled) => setDraft({ ...draft, enabled })}
+                  />
                   <div className="flex flex-wrap gap-2">
-                    <AdminButton
-                      size="sm"
-                      onClick={() => {
-                        setOptionDraft({ ...opt })
-                        setOptionOriginal(opt)
-                        setValueDraft(null)
-                        setMessage('')
-                      }}
-                    >
+                    <AdminButton size="sm" variant="primary" loading={saving} onClick={() => void saveDraft()}>
+                      حفظ
+                    </AdminButton>
+                    <AdminButton size="sm" disabled={saving} onClick={() => setDraft(null)}>
+                      إلغاء
+                    </AdminButton>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{defName(link.definition_id)}</p>
+                    <p className="text-[0.8125rem] text-muted">
+                      {link.required ? 'مطلوب' : 'اختياري'}
+                      {!link.enabled ? ' · معطّل' : ''}
+                      {' · ترتيب '}
+                      {link.sort_order}
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <AdminButton size="sm" onClick={() => setDraft({ ...link })}>
                       تعديل
                     </AdminButton>
-                    <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmOptionId(opt.id)}>
-                      حذف
+                    <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmId(link.id)}>
+                      فك الربط
                     </AdminButton>
                   </div>
                 </div>
               )}
-
-              <div className="grid gap-2 border-t border-line/80 pt-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-muted">القيم ({values.length})</p>
-                  <AdminButton
-                    size="sm"
-                    variant="secondary"
-                    disabled={Boolean(valueDraft) || !opt.id}
-                    onClick={() => {
-                      const sort = Math.max(0, ...values.map((v) => v.sort_order)) + 10
-                      setValueDraft(emptyValue(opt.id, sort))
-                      setMessage('')
-                    }}
-                  >
-                    إضافة قيمة
-                  </AdminButton>
-                </div>
-                {valueDraft?.option_id === opt.id ? (
-                  <ValueForm
-                    draft={valueDraft}
-                    onChange={setValueDraft}
-                    saving={savingValue}
-                    onSave={() => void saveValue()}
-                    onCancel={() => setValueDraft(null)}
-                  />
-                ) : null}
-                {values.map((val) =>
-                  valueDraft?.id === val.id ? (
-                    <ValueForm
-                      key={val.id}
-                      draft={valueDraft}
-                      onChange={setValueDraft}
-                      saving={savingValue}
-                      onSave={() => void saveValue()}
-                      onCancel={() => setValueDraft(null)}
-                    />
-                  ) : (
-                    <div key={val.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-paper/80 px-2.5 py-2">
-                      <p className="text-sm text-ink">
-                        {val.name}
-                        <span className="ms-2 text-xs text-muted">
-                          {val.price_adjustment === 0
-                            ? 'بدون تعديل سعر'
-                            : val.price_adjustment > 0
-                              ? `+ ${formatEgp(val.price_adjustment)}`
-                              : formatEgp(val.price_adjustment)}
-                        </span>
-                      </p>
-                      <div className="flex gap-1.5">
-                        <AdminButton size="sm" onClick={() => setValueDraft({ ...val })}>
-                          تعديل
-                        </AdminButton>
-                        <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmValueId(val.id)}>
-                          حذف
-                        </AdminButton>
-                      </div>
-                    </div>
-                  ),
-                )}
-              </div>
             </div>
           )
         })}
       </div>
-
-      {optionDraft && !optionOriginal ? (
-        <div className="rounded-lg border border-line bg-ivory/40 p-3">
-          <OptionForm
-            draft={optionDraft}
-            onChange={setOptionDraft}
-            saving={savingOption}
-            onSave={() => void saveOption()}
-            onCancel={() => setOptionDraft(null)}
-          />
-        </div>
-      ) : null}
-
       <ConfirmDialog
-        open={Boolean(confirmOptionId)}
-        title="حذف الخيار؟"
-        body="سيتم حذف الخيار وكل قيمه نهائيًا."
-        confirmLabel="حذف"
+        open={Boolean(confirmId)}
+        title="فك ربط الخيار؟"
+        body="سيتم إزالة الخيار من هذا المنتج فقط. التعريف يبقى في المكتبة."
+        confirmLabel="فك الربط"
         cancelLabel="رجوع"
         danger
         busy={busyDelete}
-        onCancel={() => setConfirmOptionId(null)}
-        onConfirm={() => void runDeleteOption()}
-      />
-      <ConfirmDialog
-        open={Boolean(confirmValueId)}
-        title="حذف القيمة؟"
-        body="سيتم حذف هذه القيمة نهائيًا."
-        confirmLabel="حذف"
-        cancelLabel="رجوع"
-        danger
-        busy={busyDelete}
-        onCancel={() => setConfirmValueId(null)}
-        onConfirm={() => void runDeleteValue()}
+        onCancel={() => setConfirmId(null)}
+        onConfirm={() => void runDelete()}
       />
     </section>
-  )
-}
-
-function OptionForm({
-  draft,
-  onChange,
-  saving,
-  onSave,
-  onCancel,
-}: {
-  draft: AdminProductOptionRow
-  onChange: (next: AdminProductOptionRow) => void
-  saving: boolean
-  onSave: () => void
-  onCancel: () => void
-}) {
-  return (
-    <div className="grid gap-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <AdminTextField
-          id="opt-name"
-          label="اسم الخيار"
-          required
-          value={draft.name}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        />
-        <AdminSelectField
-          id="opt-selection"
-          label="نوع الاختيار"
-          value={draft.selection_type}
-          onChange={(e) => onChange({ ...draft, selection_type: e.target.value as ProductOptionSelection })}
-        >
-          {(Object.keys(SELECTION_LABELS) as ProductOptionSelection[]).map((key) => (
-            <option key={key} value={key}>
-              {SELECTION_LABELS[key]}
-            </option>
-          ))}
-        </AdminSelectField>
-        <AdminTextAreaField
-          id="opt-desc"
-          label="وصف الخيار"
-          wrapperClassName="sm:col-span-2"
-          value={draft.description}
-          onChange={(e) => onChange({ ...draft, description: e.target.value })}
-        />
-        <AdminTextField
-          id="opt-sort"
-          label="ترتيب العرض"
-          type="number"
-          inputMode="numeric"
-          dir="ltr"
-          className="text-start"
-          hint={SORT_HINT}
-          value={String(draft.sort_order)}
-          onChange={(e) => onChange({ ...draft, sort_order: Number(e.target.value) })}
-        />
-      </div>
-      <AdminSwitch
-        id="opt-required"
-        label="مطلوب"
-        description="يلزم العميل اختيار قيمة قبل المتابعة."
-        checked={draft.required}
-        onChange={(required) => onChange({ ...draft, required })}
-      />
-      <AdminSwitch
-        id="opt-enabled"
-        label="ظاهر في الموقع"
-        description="عند إيقافه لن يظهر هذا الخيار للعملاء."
-        checked={draft.enabled}
-        onChange={(enabled) => onChange({ ...draft, enabled })}
-      />
-      <div className="flex flex-wrap gap-2">
-        <AdminButton size="sm" variant="primary" loading={saving} onClick={onSave}>
-          حفظ الخيار
-        </AdminButton>
-        <AdminButton size="sm" disabled={saving} onClick={onCancel}>
-          إلغاء
-        </AdminButton>
-      </div>
-    </div>
-  )
-}
-
-function ValueForm({
-  draft,
-  onChange,
-  saving,
-  onSave,
-  onCancel,
-}: {
-  draft: AdminProductOptionValueRow
-  onChange: (next: AdminProductOptionValueRow) => void
-  saving: boolean
-  onSave: () => void
-  onCancel: () => void
-}) {
-  return (
-    <div className="grid gap-3 rounded-md border border-dashed border-line bg-paper p-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <AdminTextField
-          id="val-name"
-          label="اسم القيمة"
-          required
-          value={draft.name}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        />
-        <AdminTextField
-          id="val-price"
-          label="تعديل السعر"
-          type="number"
-          inputMode="decimal"
-          dir="ltr"
-          className="text-start"
-          hint="موجب يزيد السعر، سالب يخصم منه."
-          value={String(draft.price_adjustment)}
-          onChange={(e) => onChange({ ...draft, price_adjustment: Number(e.target.value) })}
-        />
-        <AdminTextField
-          id="val-sort"
-          label="ترتيب العرض"
-          type="number"
-          inputMode="numeric"
-          dir="ltr"
-          className="text-start"
-          value={String(draft.sort_order)}
-          onChange={(e) => onChange({ ...draft, sort_order: Number(e.target.value) })}
-        />
-      </div>
-      <AdminSwitch
-        id="val-enabled"
-        label="ظاهر في الموقع"
-        checked={draft.enabled}
-        onChange={(enabled) => onChange({ ...draft, enabled })}
-      />
-      <div className="flex flex-wrap gap-2">
-        <AdminButton size="sm" variant="primary" loading={saving} onClick={onSave}>
-          حفظ القيمة
-        </AdminButton>
-        <AdminButton size="sm" disabled={saving} onClick={onCancel}>
-          إلغاء
-        </AdminButton>
-      </div>
-    </div>
   )
 }
 
@@ -714,7 +772,9 @@ export function AdminProductsPage() {
     },
     upsert: upsertAdminProduct,
     prepare: (draft) => {
-      const isCake = Boolean(draft.legacy_cake_id) || draft.pricing_mode === 'cake_sizes'
+      const isCake = Boolean(draft.legacy_cake_id) || draft.ordering_model === 'cake_servings'
+      const ordering = (isCake ? 'cake_servings' : draft.ordering_model || 'fixed_item') as ProductOrderingModel
+      const pricing = pricingModeFromOrdering(ordering)
       return {
         ...draft,
         id: draft.id || generateId(draft.name, 'product', productIds.current),
@@ -722,27 +782,37 @@ export function AdminProductsPage() {
         description: draft.description.trim(),
         price_note: draft.price_note.trim(),
         image_alt: draft.image_alt.trim(),
+        ordering_model: ordering,
+        pricing_mode: pricing,
+        qty_min: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_min) || 1 : null,
+        qty_max: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_max) || 99 : null,
+        qty_step: ordering === 'quantity' || ordering === 'custom' ? Number(draft.qty_step) || 1 : null,
         sort_order: draft.id ? Number(draft.sort_order) || 0 : nextSort.current,
         fixed_price:
-          isCake || draft.pricing_mode !== 'fixed' || draft.fixed_price == null || Number.isNaN(Number(draft.fixed_price))
+          isCake || ordering === 'quote' || ordering === 'weight'
             ? isCake
               ? draft.fixed_price
               : null
-            : Number(draft.fixed_price),
+            : draft.fixed_price == null || Number.isNaN(Number(draft.fixed_price))
+              ? null
+              : Number(draft.fixed_price),
       }
     },
     validate: (draft) => {
       const isCake = Boolean(draft.legacy_cake_id)
+      const ordering = (draft.ordering_model || 'fixed_item') as ProductOrderingModel
       return {
         name: draft.name.trim() ? undefined : 'أدخلي اسم المنتج.',
         category_id: draft.category_id ? undefined : 'اختاري التصنيف.',
         fixed_price:
-          !isCake && draft.pricing_mode === 'fixed' && (draft.fixed_price == null || Number.isNaN(Number(draft.fixed_price)))
+          !isCake &&
+          ordering === 'fixed_item' &&
+          (draft.fixed_price == null || Number.isNaN(Number(draft.fixed_price)))
             ? 'أدخلي السعر الثابت.'
             : undefined,
         image_key: uploading ? 'انتظري حتى يكتمل رفع الصورة.' : undefined,
-        pricing_mode:
-          !isCake && draft.pricing_mode === 'cake_sizes' ? 'هذا النمط متاح فقط للمنتجات المرتبطة بالتورت.' : undefined,
+        ordering_model:
+          !isCake && ordering === 'cake_servings' ? 'هذا النمط متاح فقط للمنتجات المرتبطة بالتورت.' : undefined,
       }
     },
     onSaved: async (saved, previous) => {
@@ -764,6 +834,7 @@ export function AdminProductsPage() {
     row.name,
     row.description,
     categoryPath(categories, row.category_id),
+    ORDERING_LABELS[row.ordering_model ?? 'fixed_item'],
     PRICING_LABELS[row.pricing_mode],
   ])
 
@@ -881,8 +952,11 @@ export function AdminProductsPage() {
                   <AdminBadge tone="info">{categoryPath(categories, row.category_id)}</AdminBadge>
                 </Td>
                 <Td className="hidden text-[0.8125rem] text-muted lg:table-cell">
-                  {PRICING_LABELS[row.pricing_mode]}
-                  {row.pricing_mode === 'fixed' && row.fixed_price != null ? ` · ${formatEgp(row.fixed_price)}` : ''}
+                  {ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}
+                  {(row.ordering_model === 'fixed_item' || row.pricing_mode === 'fixed') &&
+                  row.fixed_price != null
+                    ? ` · ${formatEgp(row.fixed_price)}`
+                    : ''}
                 </Td>
                 <Td>
                   <EnabledBadge enabled={row.enabled} />
@@ -903,7 +977,7 @@ export function AdminProductsPage() {
                 title={row.name}
                 meta={
                   <span className="text-xs text-muted">
-                    {PRICING_LABELS[row.pricing_mode]}
+                    {ORDERING_LABELS[row.ordering_model ?? 'fixed_item']}
                     {row.legacy_cake_id ? ' · مرتبط بالتورت' : ''}
                   </span>
                 }
@@ -977,36 +1051,48 @@ export function AdminProductsPage() {
                 />
                 {isCakeLinked ? (
                   <AdminTextField
-                    id="product-pricing-ro"
-                    label="طريقة التسعير"
-                    value={PRICING_LABELS.cake_sizes}
+                    id="product-ordering-ro"
+                    label="طريقة البيع"
+                    value={ORDERING_LABELS.cake_servings}
                     readOnly
                     wrapperClassName="sm:col-span-2"
                   />
                 ) : (
                   <>
                     <AdminSelectField
-                      id="product-pricing"
-                      label="طريقة التسعير"
+                      id="product-ordering"
+                      label="طريقة البيع"
                       required
-                      value={draft.pricing_mode === 'cake_sizes' ? 'fixed' : draft.pricing_mode}
-                      error={crud.fieldErrors.pricing_mode}
+                      value={draft.ordering_model ?? 'fixed_item'}
                       onChange={(e) => {
-                        const mode = e.target.value as ProductPricingMode
+                        const mode = e.target.value as ProductOrderingModel
                         crud.update({
-                          pricing_mode: mode,
-                          fixed_price: mode === 'fixed' ? draft.fixed_price : null,
+                          ordering_model: mode,
+                          pricing_mode:
+                            mode === 'quote' ? 'quote' : mode === 'cake_servings' ? 'cake_sizes' : 'fixed',
+                          fixed_price: mode === 'quote' ? null : draft.fixed_price,
                         })
                       }}
                     >
-                      <option value="fixed">{PRICING_LABELS.fixed}</option>
-                      <option value="quote">{PRICING_LABELS.quote}</option>
+                      {(Object.keys(ORDERING_LABELS) as ProductOrderingModel[])
+                        .filter((m) => m !== 'cake_servings')
+                        .map((m) => (
+                          <option key={m} value={m}>
+                            {ORDERING_LABELS[m]}
+                          </option>
+                        ))}
                     </AdminSelectField>
-                    {draft.pricing_mode === 'fixed' ? (
+                    {(draft.ordering_model === 'fixed_item' ||
+                      draft.ordering_model === 'quantity' ||
+                      draft.ordering_model === 'custom' ||
+                      !draft.ordering_model) ? (
                       <AdminTextField
                         id="product-fixed-price"
-                        label="السعر الثابت"
-                        required
+                        label={
+                          draft.ordering_model === 'quantity' || draft.ordering_model === 'custom'
+                            ? 'سعر القطعة (إن وُجد)'
+                            : 'السعر الثابت'
+                        }
                         type="number"
                         inputMode="decimal"
                         dir="ltr"
@@ -1022,6 +1108,31 @@ export function AdminProductsPage() {
                     ) : (
                       <div />
                     )}
+                    {draft.ordering_model === 'quantity' || draft.ordering_model === 'custom' ? (
+                      <>
+                        <AdminTextField
+                          id="product-qty-min"
+                          label="أقل كمية"
+                          type="number"
+                          value={String(draft.qty_min ?? 1)}
+                          onChange={(e) => crud.update({ qty_min: Number(e.target.value) || 1 })}
+                        />
+                        <AdminTextField
+                          id="product-qty-max"
+                          label="أعلى كمية"
+                          type="number"
+                          value={String(draft.qty_max ?? 99)}
+                          onChange={(e) => crud.update({ qty_max: Number(e.target.value) || 99 })}
+                        />
+                        <AdminTextField
+                          id="product-qty-step"
+                          label="خطوة الكمية"
+                          type="number"
+                          value={String(draft.qty_step ?? 1)}
+                          onChange={(e) => crud.update({ qty_step: Number(e.target.value) || 1 })}
+                        />
+                      </>
+                    ) : null}
                   </>
                 )}
                 <AdminTextField
@@ -1072,7 +1183,13 @@ export function AdminProductsPage() {
             </section>
 
             {isEditing && crud.original ? (
-              <OptionSection productId={crud.original.id} isCakeLinked={isCakeLinked} />
+              <>
+                <PriceTierSection
+                  productId={crud.original.id}
+                  orderingModel={(draft.ordering_model ?? 'fixed_item') as ProductOrderingModel}
+                />
+                <OptionLinkSection productId={crud.original.id} isCakeLinked={isCakeLinked} />
+              </>
             ) : null}
 
             {isEditing && crud.original ? (

@@ -7,6 +7,7 @@ import { useCatalog } from '@/providers/CatalogProvider'
 import { socialLinks } from '@/data/socialLinks'
 import { getCategoryLabel, getProduct } from '@/services/catalogService'
 import { formatEgp } from '@/utils/format'
+import { isCakeOrdering, isQuoteOrdering } from '@/types/products'
 import { cx } from '@/utils/cx'
 
 export function ProductDetailPage() {
@@ -17,6 +18,8 @@ export function ProductDetailPage() {
 
   const [activeImage, setActiveImage] = useState(0)
   const [selectedValues, setSelectedValues] = useState<Record<string, string[]>>({})
+  const [priceTierId, setPriceTierId] = useState('')
+  const [quantity, setQuantity] = useState('1')
 
   const images = useMemo(() => {
     if (!product) return []
@@ -37,11 +40,14 @@ export function ProductDetailPage() {
     )
   }
 
-  if (product.legacyCakeId || product.pricingMode === 'cake_sizes') {
+  if (isCakeOrdering(product)) {
     return <Navigate to={`/order?cake=${product.legacyCakeId || product.id}&mode=catalog`} replace />
   }
 
   const current = images[Math.min(activeImage, Math.max(images.length - 1, 0))]
+  const packages = product.priceTiers.filter((t) => t.tierKind === 'package' && t.enabled)
+  const weights = product.priceTiers.filter((t) => t.tierKind === 'weight' && t.enabled)
+  const selectedTier = product.priceTiers.find((t) => t.id === priceTierId)
   const optionsTotal = product.options.reduce((sum, option) => {
     const selected = selectedValues[option.id] ?? []
     return (
@@ -52,8 +58,19 @@ export function ProductDetailPage() {
     )
   }, 0)
 
-  const base = product.pricingMode === 'fixed' ? product.fixedPrice : null
-  const displayTotal = base == null ? null : base + optionsTotal
+  let displayTotal: number | null = null
+  if (isQuoteOrdering(product)) {
+    displayTotal = null
+  } else if (selectedTier) {
+    displayTotal =
+      selectedTier.tierKind === 'package' || selectedTier.tierKind === 'weight'
+        ? selectedTier.price + optionsTotal
+        : selectedTier.price * Math.max(Number(quantity) || 1, 1) + optionsTotal * Math.max(Number(quantity) || 1, 1)
+  } else if (product.orderingModel === 'fixed_item' && product.fixedPrice != null) {
+    displayTotal = product.fixedPrice + optionsTotal
+  } else if (product.fixedPrice != null && packages.length === 0 && weights.length === 0) {
+    displayTotal = product.fixedPrice * Math.max(Number(quantity) || 1, 1) + optionsTotal * Math.max(Number(quantity) || 1, 1)
+  }
 
   const optionQuery = Object.entries(selectedValues)
     .flatMap(([, ids]) => ids)
@@ -68,13 +85,14 @@ export function ProductDetailPage() {
           : [...currentIds, valueId]
         return { ...prev, [optionId]: next }
       }
-      // toggle / single
       const next = currentIds.includes(valueId) ? [] : [valueId]
       return { ...prev, [optionId]: next }
     })
   }
 
-  const orderHref = `/order?product=${product.id}${optionQuery ? `&options=${optionQuery}` : ''}&mode=catalog`
+  const orderHref = `/order?product=${product.id}${optionQuery ? `&options=${optionQuery}` : ''}${
+    priceTierId ? `&tier=${priceTierId}` : ''
+  }${quantity ? `&qty=${encodeURIComponent(quantity)}` : ''}&mode=catalog`
 
   return (
     <Container className="py-10 sm:py-14">
@@ -120,19 +138,64 @@ export function ProductDetailPage() {
           <p className="mt-4 leading-8 text-muted">{product.description}</p>
 
           <div className="mt-6 rounded-2xl border border-line/80 bg-paper p-5">
-            {product.pricingMode === 'fixed' && product.fixedPrice != null ? (
-              <p className="text-lg font-bold text-ink">
-                {displayTotal != null ? formatEgp(displayTotal) : formatEgp(product.fixedPrice)}
-              </p>
-            ) : product.pricingMode === 'quote' ? (
+            {isQuoteOrdering(product) ? (
               <p className="text-lg font-bold text-ink">اطلب السعر — لا يُحسب تلقائيًا عند الطلب</p>
+            ) : displayTotal != null ? (
+              <p className="text-lg font-bold text-ink">{formatEgp(displayTotal)}</p>
             ) : (
-              <p className="text-lg font-bold text-ink">السعر يُحدَّد عند التأكيد</p>
+              <p className="text-lg font-bold text-ink">اختاري الخيارات لعرض السعر</p>
             )}
             {product.priceNote ? <p className="mt-2 text-sm text-muted">{product.priceNote}</p> : null}
           </div>
 
-          {product.pricingMode !== 'quote' && product.options.length > 0 ? (
+          {packages.length > 0 ? (
+            <div className="mt-6 grid gap-2">
+              <h2 className="font-display text-2xl text-rose-deep">الباكدجات</h2>
+              <div className="flex flex-wrap gap-2">
+                {packages.map((tier) => (
+                  <button
+                    key={tier.id}
+                    type="button"
+                    aria-pressed={priceTierId === tier.id}
+                    onClick={() => {
+                      setPriceTierId(tier.id)
+                      setQuantity(String(tier.packageQty ?? 1))
+                    }}
+                    className={cx(
+                      'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold',
+                      priceTierId === tier.id ? 'bg-rose-deep text-ivory' : 'border border-line bg-paper text-ink',
+                    )}
+                  >
+                    {tier.label} — {formatEgp(tier.price)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {weights.length > 0 ? (
+            <div className="mt-6 grid gap-2">
+              <h2 className="font-display text-2xl text-rose-deep">الأوزان</h2>
+              <div className="flex flex-wrap gap-2">
+                {weights.map((tier) => (
+                  <button
+                    key={tier.id}
+                    type="button"
+                    aria-pressed={priceTierId === tier.id}
+                    onClick={() => setPriceTierId(tier.id)}
+                    className={cx(
+                      'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold',
+                      priceTierId === tier.id ? 'bg-rose-deep text-ivory' : 'border border-line bg-paper text-ink',
+                    )}
+                  >
+                    {tier.label} — {formatEgp(tier.price)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {!isQuoteOrdering(product) && product.options.length > 0 ? (
             <div className="mt-6 grid gap-4">
               <h2 className="font-display text-2xl text-rose-deep">خيارات إضافية</h2>
               {product.options.map((option) => (
@@ -141,7 +204,6 @@ export function ProductDetailPage() {
                     {option.name}
                     {option.required ? ' *' : ''}
                   </legend>
-                  {option.description ? <p className="mb-3 text-sm text-muted">{option.description}</p> : null}
                   <div className="flex flex-wrap gap-2">
                     {option.values.map((value) => {
                       const selected = (selectedValues[option.id] ?? []).includes(value.id)
@@ -168,7 +230,7 @@ export function ProductDetailPage() {
           ) : null}
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            {product.pricingMode === 'quote' ? (
+            {isQuoteOrdering(product) ? (
               <a
                 href={`${socialLinks.whatsapp}?text=${encodeURIComponent(`مرحبًا مستكة، أريد طلب سعر لمنتج: ${product.name}`)}`}
                 target="_blank"

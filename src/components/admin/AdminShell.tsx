@@ -37,6 +37,7 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
     label: 'المحتوى',
     items: [
       { to: '/admin/products', label: 'المنتجات', end: false, icon: <IconCake /> },
+      { to: '/admin/options', label: 'مكتبة الخيارات', end: false, icon: <IconLayers /> },
       { to: '/admin/categories', label: 'التصنيفات', end: false, icon: <IconTag /> },
       { to: '/admin/offers', label: 'العروض والباقات', end: false, icon: <IconSparkles /> },
       { to: '/admin/reviews', label: 'آراء العملاء', end: false, icon: <IconMessage /> },

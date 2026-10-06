@@ -1,4 +1,5 @@
 import { getProduct, getZone, listTimeSlots } from '@/services/catalogService'
+import { isCakeOrdering } from '@/types/products'
 import type { AvailabilityResult, OrderDraft } from '@/types'
 import { isBookableDate, parseISODate, tooSoonMessage } from '@/utils/dates'
 import { isEgyptianMobile, normalizeDigits } from '@/utils/phone'
@@ -20,9 +21,13 @@ export function validateBasicInfo(draft: OrderDraft, availability: AvailabilityR
     errors.areaId = 'اختاري منطقة التوصيل. التوصيل حاليًا داخل القاهرة والجيزة فقط.'
   }
 
-  const people = Number(draft.servings)
-  if (!draft.servings.trim() || !Number.isInteger(people) || people < 1 || people > 999) {
-    errors.servings = 'اكتبي عدد الأفراد بالأرقام.'
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const needsServings = !draft.offerId && (!product || isCakeOrdering(product) || Boolean(draft.cakeId))
+  if (needsServings) {
+    const people = Number(draft.servings)
+    if (!draft.servings.trim() || !Number.isInteger(people) || people < 1 || people > 999) {
+      errors.servings = 'اكتبي عدد الأفراد بالأرقام.'
+    }
   }
 
   const dateMissing = !parseISODate(draft.date)
@@ -57,10 +62,23 @@ export function validateCake(draft: OrderDraft): FieldErrors {
   const errors: FieldErrors = {}
   const notes = draft.designNotes.trim()
   const product = draft.productId ? getProduct(draft.productId) : undefined
-  const isNonCakeProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+  const isConfiguredProduct = Boolean(product && !isCakeOrdering(product) && !draft.cakeId)
 
-  if (isNonCakeProduct) {
-    for (const option of product?.options ?? []) {
+  if (isConfiguredProduct && product) {
+    const packages = product.priceTiers.filter((t) => t.tierKind === 'package' && t.enabled)
+    const weights = product.priceTiers.filter((t) => t.tierKind === 'weight' && t.enabled)
+    if (packages.length > 0 || product.orderingModel === 'weight' || weights.length > 0) {
+      if (!draft.priceTierId.trim()) errors.priceTierId = 'اختاري الخيار المناسب.'
+    } else if (product.orderingModel === 'quantity' || product.orderingModel === 'custom') {
+      const qty = Number(draft.quantity)
+      const min = product.qtyMin ?? 1
+      const max = product.qtyMax ?? 99
+      const step = product.qtyStep ?? 1
+      if (!Number.isInteger(qty) || qty < min || qty > max || ((qty - min) % step) !== 0) {
+        errors.quantity = 'الكمية غير صالحة.'
+      }
+    }
+    for (const option of product.options) {
       if (!option.required) continue
       const selected = option.values.some((v) => draft.optionValueIds.includes(v.id))
       if (!selected) errors[`option_${option.id}`] = `اختاري: ${option.name}`

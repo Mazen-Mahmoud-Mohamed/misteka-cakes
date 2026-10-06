@@ -52,8 +52,20 @@
 
 -- R cake legacy path without order_kind → unchanged size+filling+extras pricing
 
+-- Extended after product-ordering-models.sql:
+-- S fake tier price in payload → ignored; product_price_tiers.price used
+-- T fake package price in payload → ignored
+-- U fake weight price in payload → ignored
+-- V invalid tier id → invalid_tier
+-- W tier belonging to another product → invalid_tier
+-- X quantity below qty_min / above qty_max / bad step → invalid_quantity
+-- Y fake option library price → ignored; definition value / override used
+-- Z quote ordering_model forced paid → quote_only
+-- AA historical order snapshot integrity (names/prices unchanged on re-read)
+
 -- Static assertions used by scripts/products-order-security-qa.mjs:
 --   quote_only rejection exists
 --   search_path empty on helpers + place_order
 --   customer_picks category enforcement exists
 --   revoke helpers from anon/authenticated
+-- Also: scripts/product-ordering-security-qa.mjs

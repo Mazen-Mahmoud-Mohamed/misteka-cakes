@@ -14,6 +14,9 @@ import type {
   ProductOption,
   ProductOptionSelection,
   ProductOptionValue,
+  ProductOrderingModel,
+  ProductPriceTier,
+  ProductPriceTierKind,
   ProductPricingMode,
 } from '@/types/products'
 
@@ -87,13 +90,66 @@ interface ProductRow {
   description: string
   category_id: string
   pricing_mode: ProductPricingMode
+  ordering_model?: ProductOrderingModel | null
   fixed_price: number | null
   price_note: string
   legacy_cake_id: string | null
+  qty_min?: number | null
+  qty_max?: number | null
+  qty_step?: number | null
   image_key: string
   image_alt: string
   sort_order: number
   enabled: boolean
+}
+
+interface ProductPriceTierRow {
+  id: string
+  product_id: string
+  tier_kind: ProductPriceTierKind
+  label: string
+  package_qty: number | null
+  qty_min: number | null
+  qty_max: number | null
+  weight_grams: number | null
+  price: number
+  sort_order: number
+  enabled: boolean
+}
+
+interface ProductOptionLinkRow {
+  id: string
+  product_id: string
+  definition_id: string
+  required: boolean
+  sort_order: number
+  enabled: boolean
+}
+
+interface OptionDefinitionRow {
+  id: string
+  name: string
+  description: string
+  selection_type: ProductOptionSelection
+  sort_order: number
+  enabled: boolean
+}
+
+interface OptionDefinitionValueRow {
+  id: string
+  definition_id: string
+  name: string
+  price_adjustment: number
+  sort_order: number
+  enabled: boolean
+}
+
+interface ProductOptionLinkValueOverrideRow {
+  id: string
+  link_id: string
+  definition_value_id: string
+  price_adjustment: number
+  enabled: boolean | null
 }
 
 interface ProductImageRow {
@@ -267,25 +323,55 @@ function mapOptions(rows: ProductOptionRow[], valuesByOption: Map<string, Produc
   }))
 }
 
+function inferOrderingModel(row: ProductRow): ProductOrderingModel {
+  if (row.ordering_model) return row.ordering_model
+  if (row.pricing_mode === 'cake_sizes' || row.legacy_cake_id) return 'cake_servings'
+  if (row.pricing_mode === 'quote') return 'quote'
+  return 'fixed_item'
+}
+
+function mapPriceTiers(rows: ProductPriceTierRow[]): ProductPriceTier[] {
+  return rows.map((row) => ({
+    id: row.id,
+    productId: row.product_id,
+    tierKind: row.tier_kind,
+    label: row.label,
+    packageQty: row.package_qty,
+    qtyMin: row.qty_min,
+    qtyMax: row.qty_max,
+    weightGrams: row.weight_grams,
+    price: Number(row.price),
+    sortOrder: row.sort_order,
+    enabled: row.enabled,
+  }))
+}
+
 function mapProducts(
   rows: ProductRow[],
   imagesByProduct: Map<string, ProductImage[]>,
   optionsByProduct: Map<string, ProductOption[]>,
+  tiersByProduct: Map<string, ProductPriceTier[]>,
 ): Product[] {
   return rows.map((row) => {
     const imageKey = row.image_key ?? ''
     const image = imageKey ? resolveCakeImage(imageKey) : ''
     const images = (imagesByProduct.get(row.id) ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder)
     const options = (optionsByProduct.get(row.id) ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder)
+    const priceTiers = (tiersByProduct.get(row.id) ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder)
+    const orderingModel = inferOrderingModel(row)
     return {
       id: row.id,
       name: row.name,
       description: row.description ?? '',
       categoryId: row.category_id,
       pricingMode: row.pricing_mode,
+      orderingModel,
       fixedPrice: row.fixed_price == null ? null : Number(row.fixed_price),
       priceNote: row.price_note ?? '',
       legacyCakeId: row.legacy_cake_id,
+      qtyMin: row.qty_min ?? null,
+      qtyMax: row.qty_max ?? null,
+      qtyStep: row.qty_step ?? null,
       image: image || images[0]?.image || '',
       imageAlt: row.image_alt.trim() || row.name,
       imageKey,
@@ -307,6 +393,7 @@ function mapProducts(
               ]
             : [],
       options,
+      priceTiers,
     }
   })
 }
@@ -372,9 +459,13 @@ function synthesizeProductsFromCakes(cakes: Cake[]): Product[] {
     description: cake.description,
     categoryId: cake.category,
     pricingMode: 'cake_sizes' as const,
+    orderingModel: 'cake_servings' as const,
     fixedPrice: null,
     priceNote: cake.priceNote,
     legacyCakeId: cake.id,
+    qtyMin: null,
+    qtyMax: null,
+    qtyStep: null,
     image: cake.image,
     imageAlt: cake.imageAlt,
     imageKey: '',
@@ -391,6 +482,7 @@ function synthesizeProductsFromCakes(cakes: Cake[]): Product[] {
       },
     ],
     options: [] as ProductOption[],
+    priceTiers: [],
   }))
 }
 
@@ -427,6 +519,11 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     productOptionValuesRes,
     offersRes,
     offerComponentsRes,
+    priceTiersRes,
+    optionDefsRes,
+    optionDefValuesRes,
+    optionLinksRes,
+    optionOverridesRes,
   ] = await Promise.all([
     supabase.from('cake_sizes').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('cakes').select('*').eq('enabled', true).order('sort_order'),
@@ -441,6 +538,11 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
     supabase.from('product_option_values').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('offers').select('*').eq('enabled', true).order('sort_order'),
     supabase.from('offer_components').select('*').order('sort_order'),
+    supabase.from('product_price_tiers').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('option_definitions').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('option_definition_values').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('product_option_links').select('*').eq('enabled', true).order('sort_order'),
+    supabase.from('product_option_link_value_overrides').select('*'),
   ])
 
   // Sizes are the source of truth for /pricing — fail closed if they do not load.
@@ -513,15 +615,75 @@ async function fetchRemoteCatalog(): Promise<RemoteCatalogResult> {
   const valueRows = !productOptionValuesRes.error ? ((productOptionValuesRes.data ?? []) as ProductOptionValueRow[]) : []
   const optionRows = !productOptionsRes.error ? ((productOptionsRes.data ?? []) as ProductOptionRow[]) : []
   const imageRows = !productImagesRes.error ? ((productImagesRes.data ?? []) as ProductImageRow[]) : []
+  const tierRows = !priceTiersRes.error ? ((priceTiersRes.data ?? []) as ProductPriceTierRow[]) : []
+  const defRows = !optionDefsRes.error ? ((optionDefsRes.data ?? []) as OptionDefinitionRow[]) : []
+  const defValueRows = !optionDefValuesRes.error
+    ? ((optionDefValuesRes.data ?? []) as OptionDefinitionValueRow[])
+    : []
+  const linkRows = !optionLinksRes.error ? ((optionLinksRes.data ?? []) as ProductOptionLinkRow[]) : []
+  const overrideRows = !optionOverridesRes.error
+    ? ((optionOverridesRes.data ?? []) as ProductOptionLinkValueOverrideRow[])
+    : []
 
   const valuesByOption = groupBy(mapOptionValues(valueRows), (value) => value.optionId)
   const mappedOptions = mapOptions(optionRows, valuesByOption)
   const optionsByProduct = groupBy(mappedOptions, (option) => option.productId)
+
+  // Merge reusable library options linked to products
+  const defValuesByDef = groupBy(
+    defValueRows.map((row) => ({
+      id: row.id,
+      optionId: row.definition_id,
+      name: row.name,
+      priceAdjustment: Number(row.price_adjustment),
+      sortOrder: row.sort_order,
+      enabled: row.enabled,
+    })),
+    (v) => v.optionId,
+  )
+  const overridesByLink = groupBy(overrideRows, (o) => o.link_id)
+  for (const link of linkRows) {
+    const def = defRows.find((d) => d.id === link.definition_id)
+    if (!def) continue
+    const overrides = overridesByLink.get(link.id) ?? []
+    const values = (defValuesByDef.get(def.id) ?? [])
+      .filter((v) => {
+        const ov = overrides.find((o) => o.definition_value_id === v.id)
+        if (ov?.enabled === false) return false
+        return v.enabled
+      })
+      .map((v) => {
+        const ov = overrides.find((o) => o.definition_value_id === v.id)
+        return {
+          ...v,
+          optionId: link.id,
+          priceAdjustment: ov ? Number(ov.price_adjustment) : v.priceAdjustment,
+        }
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    const linked: ProductOption = {
+      id: link.id,
+      productId: link.product_id,
+      definitionId: def.id,
+      name: def.name,
+      description: def.description ?? '',
+      selectionType: def.selection_type,
+      required: link.required,
+      sortOrder: link.sort_order,
+      enabled: link.enabled,
+      values,
+    }
+    const list = optionsByProduct.get(link.product_id) ?? []
+    list.push(linked)
+    optionsByProduct.set(link.product_id, list)
+  }
+
+  const tiersByProduct = groupBy(mapPriceTiers(tierRows), (tier) => tier.productId)
   const imagesByProduct = groupBy(mapProductImages(imageRows), (image) => image.productId)
 
   const remoteProducts =
     !productsRes.error && (productsRes.data?.length ?? 0) > 0
-      ? mapProducts((productsRes.data ?? []) as ProductRow[], imagesByProduct, optionsByProduct)
+      ? mapProducts((productsRes.data ?? []) as ProductRow[], imagesByProduct, optionsByProduct, tiersByProduct)
       : null
   const products = remoteProducts ?? synthesizeProductsFromCakes(cakes)
 

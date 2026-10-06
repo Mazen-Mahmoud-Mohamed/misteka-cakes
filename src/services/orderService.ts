@@ -97,12 +97,14 @@ export function toSummaryView(draft: OrderDraft): SummaryView {
 export function quoteDraft(draft: OrderDraft): OrderTotal {
   const product = draft.productId ? getProduct(draft.productId) : undefined
   const offer = draft.offerId ? getOffer(draft.offerId) : undefined
-  const isFixedProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+  const isConfiguredProduct = Boolean(product && product.orderingModel !== 'cake_servings' && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
 
   const customSize = draft.sizeId === 'custom'
   const size = customSize ? null : getSize(draft.sizeId) ?? null
-  const filling = isFixedProduct ? null : getFilling(draft.fillingId) ?? null
-  const extras = isFixedProduct ? [] : listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+  const filling = isConfiguredProduct ? null : getFilling(draft.fillingId) ?? null
+  const extras = isConfiguredProduct ? [] : listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+  const qty = Math.max(Number(draft.quantity) || 1, 1)
+  const tier = product?.priceTiers.find((t) => t.id === draft.priceTierId)
 
   const optionLines =
     product?.options.flatMap((opt) =>
@@ -111,24 +113,35 @@ export function quoteDraft(draft: OrderDraft): OrderTotal {
         .map((v) => ({
           id: v.id,
           label: `${opt.name}: ${v.name}`,
-          amount: v.priceAdjustment,
+          amount:
+            tier?.tierKind === 'package' || product.orderingModel === 'fixed_item' || product.orderingModel === 'weight'
+              ? v.priceAdjustment
+              : v.priceAdjustment * qty,
         })),
     ) ?? []
 
   let fixedProductBase: { label: string; amount: number | null; pending?: boolean } | null = null
   if (offer?.pricingRule === 'custom_bundle' && offer.customBundlePrice != null) {
     fixedProductBase = { label: `باقة: ${offer.name}`, amount: offer.customBundlePrice }
-  } else if (isFixedProduct && product) {
-    if (product.pricingMode === 'fixed') {
+  } else if (isConfiguredProduct && product) {
+    if (product.orderingModel === 'quote') {
+      fixedProductBase = { label: product.name, amount: null, pending: true }
+    } else if (tier) {
+      const amount =
+        tier.tierKind === 'package' || tier.tierKind === 'weight' ? tier.price : tier.price * qty
+      fixedProductBase = { label: `${product.name}${tier.label ? ` — ${tier.label}` : ''}`, amount }
+    } else if (product.orderingModel === 'fixed_item' && product.fixedPrice != null) {
       fixedProductBase = { label: product.name, amount: product.fixedPrice }
+    } else if (product.fixedPrice != null) {
+      fixedProductBase = { label: product.name, amount: product.fixedPrice * qty }
     } else {
       fixedProductBase = { label: product.name, amount: null, pending: true }
     }
   }
 
   return calculateOrderTotal({
-    size: isFixedProduct || offer?.pricingRule === 'custom_bundle' ? null : size,
-    customSize: isFixedProduct || offer?.pricingRule === 'custom_bundle' ? false : customSize,
+    size: isConfiguredProduct || offer?.pricingRule === 'custom_bundle' ? null : size,
+    customSize: isConfiguredProduct || offer?.pricingRule === 'custom_bundle' ? false : customSize,
     filling,
     extras,
     serviceType: draft.serviceType,
@@ -248,7 +261,8 @@ export function buildOrder(
     productId: useProductPath ? draft.productId || product?.id || null : null,
     offerId: useOfferPath ? draft.offerId || null : null,
     offerName: useOfferPath ? offer?.name ?? null : null,
-    quantity: 1,
+    quantity: Number(draft.quantity) > 0 ? Number(draft.quantity) : 1,
+    priceTierId: draft.priceTierId || null,
     optionValueIds: draft.optionValueIds ?? [],
     offerSelections: useOfferPath ? offerSelections : [],
   }
@@ -380,6 +394,7 @@ function placeOrderPayload(order: Order, referencePath: string | null) {
       ...base,
       product_id: order.productId,
       quantity: order.quantity ?? 1,
+      price_tier_id: order.priceTierId || null,
       option_value_ids: order.optionValueIds ?? [],
       size_id: order.sizeId || null,
     }

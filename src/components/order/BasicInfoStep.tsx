@@ -1,6 +1,7 @@
 import { ChoiceCard } from '@/components/ui/ChoiceCard'
 import { SelectField, TextAreaField, TextField } from '@/components/ui/Field'
-import { listTimeSlots, listZones } from '@/services/catalogService'
+import { getProduct, listTimeSlots, listZones } from '@/services/catalogService'
+import { isCakeOrdering } from '@/types/products'
 import type { AvailabilityResult, OrderDraft } from '@/types'
 import type { FieldErrors } from '@/utils/validation'
 import { formatArabicDate, formatTimeLabel, isBookableDate, minBookableDate, tooSoonMessage } from '@/utils/dates'
@@ -24,6 +25,8 @@ export function BasicInfoStep({
   const dateTooSoon = Boolean(draft.date) && !isBookableDate(draft.date)
   const dateError = dateTooSoon ? tooSoonMessage() : errors.date
   const dateReady = Boolean(draft.date) && !dateTooSoon && !errors.date
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const needsServings = !draft.offerId && (!product || isCakeOrdering(product) || Boolean(draft.cakeId))
 
   return (
     <div className="grid gap-5">
@@ -82,15 +85,17 @@ export function BasicInfoStep({
         </>
       ) : null}
 
-      <TextField
-        id="servings"
-        label="عدد الأفراد"
-        inputMode="numeric"
-        value={draft.servings}
-        error={errors.servings}
-        hint="يساعدنا نرشّح المقاس من قائمة الأسعار. العدد تقريبي."
-        onChange={(event) => onChange({ servings: normalizeDigits(event.target.value) })}
-      />
+      {needsServings ? (
+        <TextField
+          id="servings"
+          label="عدد الأفراد"
+          inputMode="numeric"
+          value={draft.servings}
+          error={errors.servings}
+          hint="يساعدنا نرشّح المقاس من قائمة الأسعار. العدد تقريبي."
+          onChange={(event) => onChange({ servings: normalizeDigits(event.target.value) })}
+        />
+      ) : null}
 
       <TextField
         id="date"

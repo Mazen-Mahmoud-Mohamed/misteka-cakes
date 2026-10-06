@@ -14,6 +14,8 @@ const EMPTY: OrderDraft = {
   productId: '',
   offerId: '',
   optionValueIds: [],
+  priceTierId: '',
+  quantity: '1',
   offerPicks: {},
   structure: 'single',
   sizeId: '',

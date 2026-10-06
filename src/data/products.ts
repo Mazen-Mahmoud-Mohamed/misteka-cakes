@@ -34,9 +34,13 @@ export function createLocalProducts(): Product[] {
     description: cake.description,
     categoryId: cake.category,
     pricingMode: 'cake_sizes' as const,
+    orderingModel: 'cake_servings' as const,
     fixedPrice: null,
     priceNote: cake.priceNote,
     legacyCakeId: cake.id,
+    qtyMin: null,
+    qtyMax: null,
+    qtyStep: null,
     image: cake.image,
     imageAlt: cake.imageAlt,
     imageKey: cake.id,
@@ -53,6 +57,7 @@ export function createLocalProducts(): Product[] {
       },
     ],
     options: [] as ProductOption[],
+    priceTiers: [],
   }))
 }
 

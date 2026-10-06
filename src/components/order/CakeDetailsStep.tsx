@@ -5,6 +5,7 @@ import { useCatalog } from '@/providers/CatalogProvider'
 import { getOffer, getProduct, listCakes, listExtras, listSizes } from '@/services/catalogService'
 import { recommendSizeId, sizeFitNote } from '@/services/pricingService'
 import type { OrderDraft, PricingGroup } from '@/types'
+import { isCakeOrdering } from '@/types/products'
 import type { FieldErrors } from '@/utils/validation'
 import { formatEgp } from '@/utils/format'
 import { cx } from '@/utils/cx'
@@ -29,7 +30,7 @@ export function CakeDetailsStep({
   const cakes = listCakes()
   const product = draft.productId ? getProduct(draft.productId) : undefined
   const offer = draft.offerId ? getOffer(draft.offerId) : undefined
-  const isNonCakeProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+  const isNonCakeProduct = Boolean(product && !isCakeOrdering(product) && !draft.cakeId)
   const sizes = listSizes(draft.structure)
   const people = Number(draft.servings)
   const recommended = recommendSizeId(sizes, people)

@@ -42,6 +42,11 @@ check('offer_ui_customer_picks', offerPage.includes('اختاري الصنف') &
 check('quote_ui_blocks_checkout', productCard.includes('اطلب السعر') && productCard.includes('socialLinks.whatsapp'))
 check('gift_and_percent_math_present', sql.includes("component_pricing = 'free'") && sql.includes("component_pricing = 'percent_off'"))
 
+const orderingMig = readFileSync(join('supabase', 'product-ordering-models.sql'), 'utf8')
+check('ordering_model_migration_present', orderingMig.includes('ordering_model') && orderingMig.includes('product_price_tiers'))
+check('configured_price_helper', orderingMig.includes('order_resolve_configured_price') && orderingMig.includes("set search_path = ''"))
+check('option_library_rls', orderingMig.includes('option_definitions') && orderingMig.includes('product_option_links'))
+
 const failed = results.filter((r) => !r.ok)
 if (failed.length) {
   console.error(`\n${failed.length} check(s) failed`)

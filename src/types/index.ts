@@ -88,8 +88,12 @@ export interface OrderDraft {
   productId: string
   /** Promotional offer request (optional). */
   offerId: string
-  /** Selected product_option_values ids. */
+  /** Selected product_option_values / definition value ids. */
   optionValueIds: string[]
+  /** Selected package / weight / range tier id. */
+  priceTierId: string
+  /** Quantity for per-unit / range models. */
+  quantity: string
   /** offer component_id → chosen product_id for customer_picks. */
   offerPicks: Record<string, string>
   structure: PricingGroup
@@ -158,6 +162,7 @@ export interface Order {
   offerName?: string | null
   /** Client selection IDs only — never trusted as prices. */
   quantity?: number
+  priceTierId?: string | null
   optionValueIds?: string[]
   offerSelections?: OfferSelectionPayload[]
 }

@@ -4,6 +4,7 @@ import { BasicInfoStep } from '@/components/order/BasicInfoStep'
 import { CakeDetailsStep } from '@/components/order/CakeDetailsStep'
 import { FillingsStep } from '@/components/order/FillingsStep'
 import { OrderSummaryCard } from '@/components/order/OrderSummaryCard'
+import { ProductConfigStep } from '@/components/order/ProductConfigStep'
 import { SummaryStep } from '@/components/order/SummaryStep'
 import { Button } from '@/components/ui/Button'
 import { useOrderDraft } from '@/hooks/useOrderDraft'
@@ -11,13 +12,21 @@ import { REFERENCE_IMAGE } from '@/lib/constants'
 import { checkAvailability } from '@/services/availabilityService'
 import { buildOrder, quoteDraft, submitOrder, toSummaryView, type SummaryView } from '@/services/orderService'
 import { getProduct } from '@/services/catalogService'
+import { isCakeOrdering } from '@/types/products'
 import type { AvailabilityResult, Order, OrderDraft, PriceLine } from '@/types'
 import { isBookableDate } from '@/utils/dates'
 import { cx } from '@/utils/cx'
 import { formatEgp, formatOrderText } from '@/utils/format'
 import { validateBasicInfo, validateCake, validateCustomer, validateFilling, type FieldErrors } from '@/utils/validation'
 
-const STEP_TITLES = ['بيانات الموعد', 'تفاصيل التورتة', 'الحشوة', 'الملخص']
+const CAKE_STEP_TITLES = ['بيانات الموعد', 'تفاصيل التورتة', 'الحشوة', 'الملخص']
+const PRODUCT_STEP_TITLES = ['بيانات الموعد', 'تفاصيل المنتج', 'الملخص']
+
+function getConfiguredProductFlow(draft: OrderDraft) {
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const isConfigured = Boolean(product && !isCakeOrdering(product) && !draft.cakeId && !draft.offerId)
+  return { product, isConfigured }
+}
 
 interface DoneState {
   message: string
@@ -106,7 +115,15 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
   }
 
   function currentErrors(): FieldErrors {
+    const { isConfigured } = getConfiguredProductFlow(draft)
+    const titles = isConfigured ? PRODUCT_STEP_TITLES : CAKE_STEP_TITLES
+    const last = titles.length - 1
     if (step === 0) return validateBasicInfo(draft, availability, checking)
+    if (isConfigured) {
+      if (step === 1) return validateCake(draft)
+      if (step === last) return validateCustomer(draft)
+      return {}
+    }
     if (step === 1) {
       const next = validateCake(draft)
       if (referenceError) next.reference = referenceError
@@ -121,20 +138,27 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
     setErrors({})
-    const product = draft.productId ? getProduct(draft.productId) : undefined
-    const skipFilling = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+    const { isConfigured } = getConfiguredProductFlow(draft)
+    const max = (isConfigured ? PRODUCT_STEP_TITLES : CAKE_STEP_TITLES).length - 1
     setStep((value) => {
-      if (value === 1 && skipFilling) return 3
-      return Math.min(value + 1, STEP_TITLES.length - 1)
+      if (!isConfigured) {
+        const product = draft.productId ? getProduct(draft.productId) : undefined
+        const skipFilling = Boolean(product && !isCakeOrdering(product) && !draft.cakeId)
+        if (value === 1 && skipFilling) return 3
+      }
+      return Math.min(value + 1, max)
     })
   }
 
   function goBack() {
     setErrors({})
-    const product = draft.productId ? getProduct(draft.productId) : undefined
-    const skipFilling = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+    const { isConfigured } = getConfiguredProductFlow(draft)
     setStep((value) => {
-      if (value === 3 && skipFilling) return 1
+      if (!isConfigured) {
+        const product = draft.productId ? getProduct(draft.productId) : undefined
+        const skipFilling = Boolean(product && !isCakeOrdering(product) && !draft.cakeId)
+        if (value === 3 && skipFilling) return 1
+      }
       return Math.max(value - 1, 0)
     })
   }
@@ -200,6 +224,9 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
   }
 
   const estimate = quoteDraft(draft)
+  const { isConfigured } = getConfiguredProductFlow(draft)
+  const stepTitles = isConfigured ? PRODUCT_STEP_TITLES : CAKE_STEP_TITLES
+  const summaryStep = stepTitles.length - 1
 
   if (done) {
     return (
@@ -230,12 +257,12 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
       className="scroll-mt-28"
       onSubmit={(event) => {
         event.preventDefault()
-        if (step === STEP_TITLES.length - 1) void confirm()
+        if (step === summaryStep) void confirm()
         else goNext()
       }}
     >
-      <ol className="mb-6 grid grid-cols-4 gap-2" aria-label="خطوات الطلب">
-        {STEP_TITLES.map((title, index) => (
+      <ol className="mb-6 grid gap-2" style={{ gridTemplateColumns: `repeat(${stepTitles.length}, minmax(0, 1fr))` }} aria-label="خطوات الطلب">
+        {stepTitles.map((title, index) => (
           <li key={title} className="grid gap-2">
             <span className={cx('h-1 rounded-full', index <= step ? 'bg-rose' : 'bg-line')} />
             <span className={cx('text-xs leading-snug sm:text-sm', index === step ? 'font-semibold text-rose-deep' : 'text-muted')}>
@@ -246,16 +273,17 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
       </ol>
 
       <h2 ref={headingRef} tabIndex={-1} className="font-display text-4xl text-rose-deep outline-none">
-        {STEP_TITLES[step]}
+        {stepTitles[step]}
       </h2>
       <p className="mt-2 mb-6 text-sm text-muted">
-        الخطوة {step + 1} من {STEP_TITLES.length}
+        الخطوة {step + 1} من {stepTitles.length}
       </p>
 
       {step === 0 ? (
         <BasicInfoStep draft={draft} errors={errors} onChange={update} availability={availability} checking={checking} />
       ) : null}
-      {step === 1 ? (
+      {isConfigured && step === 1 ? <ProductConfigStep draft={draft} errors={errors} onChange={update} /> : null}
+      {!isConfigured && step === 1 ? (
         <CakeDetailsStep
           draft={draft}
           errors={errors}
@@ -265,8 +293,8 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
           onReference={onReference}
         />
       ) : null}
-      {step === 2 ? <FillingsStep draft={draft} errors={errors} onChange={update} /> : null}
-      {step === 3 ? <SummaryStep draft={draft} errors={errors} onChange={update} /> : null}
+      {!isConfigured && step === 2 ? <FillingsStep draft={draft} errors={errors} onChange={update} /> : null}
+      {step === summaryStep ? <SummaryStep draft={draft} errors={errors} onChange={update} /> : null}
 
       {submitError ? (
         <p role="alert" className="mt-4 text-sm text-rose-deep">
@@ -276,7 +304,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
 
       <div className="h-28 sm:hidden" aria-hidden="true" />
       <div className="sticky bottom-0 z-20 mt-6 border-t border-line bg-ivory/95 py-3 backdrop-blur sm:static">
-        {draft.sizeId ? (
+        {(draft.sizeId || draft.priceTierId || draft.productId) ? (
           <p className="mb-3 text-sm text-muted">
             التقدير الحالي:{' '}
             <span className="font-semibold text-ink">
@@ -296,7 +324,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
             </Button>
           )}
           <Button type="submit" disabled={submitting}>
-            {step === STEP_TITLES.length - 1 ? (submitting ? 'جارٍ الإرسال' : 'إرسال للمراجعة') : 'التالي'}
+            {step === summaryStep ? (submitting ? 'جارٍ الإرسال' : 'إرسال للمراجعة') : 'التالي'}
           </Button>
         </div>
       </div>

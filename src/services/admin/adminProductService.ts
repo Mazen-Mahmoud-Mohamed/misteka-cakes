@@ -6,6 +6,7 @@ import type {
   OfferPricingRule,
   ProductCategoryKind,
   ProductOptionSelection,
+  ProductOrderingModel,
   ProductPricingMode,
 } from '@/types/products'
 
@@ -35,11 +36,56 @@ export type AdminProductRow = {
   description: string
   category_id: string
   pricing_mode: ProductPricingMode
+  ordering_model?: ProductOrderingModel
   fixed_price: number | null
   price_note: string
   legacy_cake_id: string | null
+  qty_min?: number | null
+  qty_max?: number | null
+  qty_step?: number | null
   image_key: string
   image_alt: string
+  sort_order: number
+  enabled: boolean
+}
+
+export type AdminProductPriceTierRow = {
+  id: string
+  product_id: string
+  tier_kind: 'package' | 'quantity_range' | 'weight' | 'unit'
+  label: string
+  package_qty: number | null
+  qty_min: number | null
+  qty_max: number | null
+  weight_grams: number | null
+  price: number
+  sort_order: number
+  enabled: boolean
+}
+
+export type AdminOptionDefinitionRow = {
+  id: string
+  name: string
+  description: string
+  selection_type: ProductOptionSelection
+  sort_order: number
+  enabled: boolean
+}
+
+export type AdminOptionDefinitionValueRow = {
+  id: string
+  definition_id: string
+  name: string
+  price_adjustment: number
+  sort_order: number
+  enabled: boolean
+}
+
+export type AdminProductOptionLinkRow = {
+  id: string
+  product_id: string
+  definition_id: string
+  required: boolean
   sort_order: number
   enabled: boolean
 }
@@ -380,6 +426,119 @@ export async function uploadCatalogMedia(
     xhr.onerror = () => resolve({ path: null, error: 'تعذّر رفع الصورة. تحققي من الاتصال.' })
     xhr.send(file)
   })
+}
+
+export async function listAdminProductPriceTiers(productId: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<AdminProductPriceTierRow[]>(error!)
+  const { data, error: qErr } = await supabase
+    .from('product_price_tiers')
+    .select('*')
+    .eq('product_id', productId)
+    .order('sort_order')
+  if (qErr) return fail<AdminProductPriceTierRow[]>('تعذّر تحميل شرائح السعر.')
+  return { data: (data ?? []) as AdminProductPriceTierRow[], error: null }
+}
+
+export async function upsertAdminProductPriceTier(row: AdminProductPriceTierRow) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('product_price_tiers').upsert(row, { onConflict: 'id' })
+  if (qErr) return { ok: false, message: 'تعذّر حفظ شريحة السعر.' }
+  return { ok: true, message: 'تم حفظ شريحة السعر.' }
+}
+
+export async function deleteAdminProductPriceTier(id: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('product_price_tiers').delete().eq('id', id)
+  if (qErr) return { ok: false, message: 'تعذّر حذف شريحة السعر.' }
+  return { ok: true, message: 'تم حذف شريحة السعر.' }
+}
+
+export async function listAdminOptionDefinitions() {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<AdminOptionDefinitionRow[]>(error!)
+  const { data, error: qErr } = await supabase.from('option_definitions').select('*').order('sort_order')
+  if (qErr) return fail<AdminOptionDefinitionRow[]>('تعذّر تحميل مكتبة الخيارات.')
+  return { data: (data ?? []) as AdminOptionDefinitionRow[], error: null }
+}
+
+export async function upsertAdminOptionDefinition(row: AdminOptionDefinitionRow) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('option_definitions').upsert(row, { onConflict: 'id' })
+  if (qErr) return { ok: false, message: 'تعذّر حفظ الخيار.' }
+  return { ok: true, message: 'تم حفظ الخيار.' }
+}
+
+export async function deleteAdminOptionDefinition(id: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('option_definitions').delete().eq('id', id)
+  if (qErr) {
+    return {
+      ok: false,
+      message: qErr.code === '23503' ? 'الخيار مرتبط بمنتجات. افصليه أولًا أو أخفيه.' : 'تعذّر حذف الخيار.',
+    }
+  }
+  return { ok: true, message: 'تم حذف الخيار.' }
+}
+
+export async function listAdminOptionDefinitionValues(definitionId: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<AdminOptionDefinitionValueRow[]>(error!)
+  const { data, error: qErr } = await supabase
+    .from('option_definition_values')
+    .select('*')
+    .eq('definition_id', definitionId)
+    .order('sort_order')
+  if (qErr) return fail<AdminOptionDefinitionValueRow[]>('تعذّر تحميل قيم الخيار.')
+  return { data: (data ?? []) as AdminOptionDefinitionValueRow[], error: null }
+}
+
+export async function upsertAdminOptionDefinitionValue(row: AdminOptionDefinitionValueRow) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('option_definition_values').upsert(row, { onConflict: 'id' })
+  if (qErr) return { ok: false, message: 'تعذّر حفظ قيمة الخيار.' }
+  return { ok: true, message: 'تم حفظ قيمة الخيار.' }
+}
+
+export async function deleteAdminOptionDefinitionValue(id: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('option_definition_values').delete().eq('id', id)
+  if (qErr) return { ok: false, message: 'تعذّر حذف قيمة الخيار.' }
+  return { ok: true, message: 'تم حذف قيمة الخيار.' }
+}
+
+export async function listAdminProductOptionLinks(productId: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return fail<AdminProductOptionLinkRow[]>(error!)
+  const { data, error: qErr } = await supabase
+    .from('product_option_links')
+    .select('*')
+    .eq('product_id', productId)
+    .order('sort_order')
+  if (qErr) return fail<AdminProductOptionLinkRow[]>('تعذّر تحميل روابط الخيارات.')
+  return { data: (data ?? []) as AdminProductOptionLinkRow[], error: null }
+}
+
+export async function upsertAdminProductOptionLink(row: AdminProductOptionLinkRow) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('product_option_links').upsert(row, { onConflict: 'id' })
+  if (qErr) return { ok: false, message: 'تعذّر ربط الخيار بالمنتج.' }
+  return { ok: true, message: 'تم ربط الخيار.' }
+}
+
+export async function deleteAdminProductOptionLink(id: string) {
+  const { supabase, error } = await requireClient()
+  if (!supabase) return { ok: false, message: error! }
+  const { error: qErr } = await supabase.from('product_option_links').delete().eq('id', id)
+  if (qErr) return { ok: false, message: 'تعذّر فك ربط الخيار.' }
+  return { ok: true, message: 'تم فك الربط.' }
 }
 
 export async function deleteCatalogMedia(path: string) {

@@ -29,6 +29,7 @@ import { PricingPage } from '@/pages/PricingPage'
 import { ProductDetailPage } from '@/pages/ProductDetailPage'
 import { TrackOrderPage } from '@/pages/TrackOrderPage'
 import { AdminProductsPage } from '@/pages/admin/AdminProductsPage'
+import { AdminOptionsLibraryPage } from '@/pages/admin/AdminOptionsLibraryPage'
 import { AdminOffersPage } from '@/pages/admin/AdminOffersPage'
 
 function ScrollManager() {
@@ -97,6 +98,7 @@ function AdminRoutes() {
             <Route path="orders/:id" element={<AdminOrderDetailPage />} />
             <Route path="cakes" element={<AdminCakesPage />} />
             <Route path="products" element={<AdminProductsPage />} />
+            <Route path="options" element={<AdminOptionsLibraryPage />} />
             <Route path="categories" element={<AdminCategoriesPage />} />
             <Route path="offers" element={<AdminOffersPage />} />
             <Route path="sizes" element={<AdminSizesPage />} />

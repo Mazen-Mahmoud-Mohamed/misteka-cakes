@@ -3,12 +3,13 @@ import { ButtonLink } from '@/components/ui/Button'
 import { socialLinks } from '@/data/socialLinks'
 import { getCategoryLabel, getCake } from '@/services/catalogService'
 import type { Product } from '@/types/products'
+import { isCakeOrdering, isQuoteOrdering } from '@/types/products'
 import { cx } from '@/utils/cx'
 import { formatEgp } from '@/utils/format'
 
 function productHref(product: Product): string {
-  if (product.pricingMode === 'quote') return `/product/${product.id}`
-  if (product.legacyCakeId || product.pricingMode === 'cake_sizes') {
+  if (isQuoteOrdering(product)) return `/product/${product.id}`
+  if (isCakeOrdering(product)) {
     const cakeId = product.legacyCakeId || product.id
     return `/order?cake=${cakeId}&mode=catalog`
   }
@@ -20,18 +21,30 @@ function quoteWhatsAppHref(product: Product): string {
   return `${socialLinks.whatsapp}?text=${text}`
 }
 
+function priceLabelFor(product: Product): string | null {
+  if (isQuoteOrdering(product)) return 'اطلب السعر'
+  if (isCakeOrdering(product)) return 'السعر حسب المقاس'
+  const packages = product.priceTiers.filter((t) => t.tierKind === 'package' && t.enabled)
+  if (packages.length > 0) {
+    const prices = packages.map((p) => p.price)
+    const min = Math.min(...prices)
+    const max = Math.max(...prices)
+    return min === max ? `من ${formatEgp(min)}` : `من ${formatEgp(min)} — ${formatEgp(max)}`
+  }
+  const weights = product.priceTiers.filter((t) => t.tierKind === 'weight' && t.enabled)
+  if (weights.length > 0) {
+    const min = Math.min(...weights.map((w) => w.price))
+    return `من ${formatEgp(min)}`
+  }
+  if (product.fixedPrice != null) return formatEgp(product.fixedPrice)
+  return null
+}
+
 export function ProductCard({ product, className }: { product: Product; className?: string }) {
   const cake = product.legacyCakeId ? getCake(product.legacyCakeId) : undefined
   const href = productHref(product)
-  const isQuote = product.pricingMode === 'quote'
-  const priceLabel =
-    product.pricingMode === 'fixed' && product.fixedPrice != null
-      ? formatEgp(product.fixedPrice)
-      : product.pricingMode === 'cake_sizes'
-        ? 'السعر حسب المقاس'
-        : isQuote
-          ? 'اطلب السعر'
-          : null
+  const isQuote = isQuoteOrdering(product)
+  const priceLabel = priceLabelFor(product)
 
   return (
     <article className={cx('group flex h-full flex-col overflow-hidden rounded-3xl border border-line/80 bg-paper', className)}>
@@ -57,7 +70,7 @@ export function ProductCard({ product, className }: { product: Product; classNam
             >
               اطلب السعر
             </a>
-          ) : product.legacyCakeId || product.pricingMode === 'cake_sizes' ? (
+          ) : isCakeOrdering(product) ? (
             <>
               <ButtonLink to={`/order?cake=${product.legacyCakeId || product.id}&mode=catalog`} className="w-full">
                 اطلبي هذا التصميم
