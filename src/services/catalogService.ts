@@ -1,6 +1,7 @@
 import { timeSlots } from '@/data/options'
 import { getCatalog } from '@/services/catalogStore'
 import type { Cake, CakeSize, PricingGroup } from '@/types'
+import type { Offer, Product, ProductCategory } from '@/types/products'
 
 /**
  * Synchronous catalog accessors.
@@ -17,11 +18,87 @@ export function listCategories() {
 }
 
 export function getCategoryLabel(id: string): string {
-  return getCatalog().categories.find((category) => category.id === id)?.name ?? ''
+  return (
+    getCatalog().productCategories.find((category) => category.id === id)?.name ||
+    getCatalog().categories.find((category) => category.id === id)?.name ||
+    ''
+  )
 }
 
 export function getCake(id: string): Cake | undefined {
   return getCatalog().cakes.find((cake) => cake.id === id)
+}
+
+export function listProductCategories(): ProductCategory[] {
+  return getCatalog().productCategories.filter((c) => c.enabled)
+}
+
+export function listTopProductCategories(): ProductCategory[] {
+  return listProductCategories()
+    .filter((c) => c.parentId === null)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+export function listChildProductCategories(parentId: string): ProductCategory[] {
+  return listProductCategories()
+    .filter((c) => c.parentId === parentId)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+export function getProductCategory(id: string): ProductCategory | undefined {
+  return listProductCategories().find((c) => c.id === id)
+}
+
+export function listProducts(): Product[] {
+  return getCatalog().products.filter((p) => p.enabled)
+}
+
+export function getProduct(id: string): Product | undefined {
+  return listProducts().find((p) => p.id === id)
+}
+
+export function listProductsInCategory(categoryId: string | 'all', subcategoryId?: string | 'all'): Product[] {
+  const products = listProducts()
+  if (categoryId === 'all') return products
+
+  const category = getProductCategory(categoryId)
+  if (!category) return []
+
+  if (category.kind === 'offers') return []
+
+  const childIds = listChildProductCategories(categoryId).map((c) => c.id)
+  const allowed = new Set<string>([categoryId, ...childIds])
+
+  let filtered = products.filter((p) => allowed.has(p.categoryId))
+  if (subcategoryId && subcategoryId !== 'all') {
+    filtered = filtered.filter((p) => p.categoryId === subcategoryId)
+  }
+  return filtered
+}
+
+export function listProductsForOfferComponent(component: {
+  productId: string | null
+  categoryId: string | null
+  customerPicks: boolean
+}): Product[] {
+  if (component.productId && !component.customerPicks) {
+    const product = getProduct(component.productId)
+    return product ? [product] : []
+  }
+  if (component.productId && component.customerPicks) {
+    const product = getProduct(component.productId)
+    return product ? [product] : []
+  }
+  if (!component.categoryId) return []
+  return listProductsInCategory(component.categoryId, 'all').filter((p) => p.pricingMode !== 'quote')
+}
+
+export function listOffers(): Offer[] {
+  return getCatalog().offers.filter((o) => o.enabled)
+}
+
+export function getOffer(id: string): Offer | undefined {
+  return listOffers().find((o) => o.id === id)
 }
 
 export function listSizes(group?: PricingGroup): CakeSize[] {

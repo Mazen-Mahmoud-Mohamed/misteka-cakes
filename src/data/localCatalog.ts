@@ -7,7 +7,9 @@ import ribbons from '@/assets/cakes/ribbons.jpeg'
 import { cakes as localCakes, localCategories } from '@/data/cakes'
 import { deliveryPolicy, deliveryZones, designExtras, fillings } from '@/data/options'
 import { basicCakePricing, pricingNotes, singleTierSizes, twoTierSizes } from '@/data/pricing'
+import { createLocalOffers, createLocalProducts, localProductCategories } from '@/data/products'
 import type { Cake, CakeCategoryInfo, CakeSize, DeliveryZone, DesignExtra, Filling } from '@/types'
+import type { Offer, Product, ProductCategory } from '@/types/products'
 
 export const cakeImageMap: Record<string, string> = {
   butterflies,
@@ -23,6 +25,9 @@ export const CAKE_IMAGE_BUCKET = 'cake-images'
 export interface CatalogBundle {
   cakes: Cake[]
   categories: CakeCategoryInfo[]
+  productCategories: ProductCategory[]
+  products: Product[]
+  offers: Offer[]
   sizes: CakeSize[]
   fillings: Filling[]
   extras: DesignExtra[]
@@ -36,6 +41,9 @@ export function createLocalCatalog(): CatalogBundle {
   return {
     cakes: localCakes,
     categories: [...localCategories],
+    productCategories: [...localProductCategories],
+    products: createLocalProducts(),
+    offers: createLocalOffers(),
     sizes: [...singleTierSizes, ...twoTierSizes],
     fillings: [...fillings],
     extras: [...designExtras],
@@ -48,7 +56,11 @@ export function createLocalCatalog(): CatalogBundle {
 
 /** True when `image_key` points at an uploaded file in the cake-images bucket. */
 export function isStoredCakeImage(imageKey: string): boolean {
-  return imageKey.startsWith('cakes/')
+  return (
+    imageKey.startsWith('cakes/') ||
+    imageKey.startsWith('products/') ||
+    imageKey.startsWith('offers/')
+  )
 }
 
 /**

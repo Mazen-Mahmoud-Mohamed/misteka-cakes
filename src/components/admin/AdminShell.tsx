@@ -34,10 +34,18 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
     ],
   },
   {
-    label: 'الكتالوج',
+    label: 'المحتوى',
+    items: [
+      { to: '/admin/products', label: 'المنتجات', end: false, icon: <IconCake /> },
+      { to: '/admin/categories', label: 'التصنيفات', end: false, icon: <IconTag /> },
+      { to: '/admin/offers', label: 'العروض والباقات', end: false, icon: <IconSparkles /> },
+      { to: '/admin/reviews', label: 'آراء العملاء', end: false, icon: <IconMessage /> },
+    ],
+  },
+  {
+    label: 'التورت (تفصيلي)',
     items: [
       { to: '/admin/cakes', label: 'التورت', end: false, icon: <IconCake /> },
-      { to: '/admin/categories', label: 'التصنيفات', end: false, icon: <IconTag /> },
       { to: '/admin/sizes', label: 'المقاسات والأسعار', end: false, icon: <IconRuler /> },
       { to: '/admin/fillings', label: 'الحشوات', end: false, icon: <IconLayers /> },
       { to: '/admin/extras', label: 'الإضافات', end: false, icon: <IconSparkles /> },
@@ -46,10 +54,6 @@ const navGroups: Array<{ label?: string; items: NavItem[] }> = [
   {
     label: 'التوصيل',
     items: [{ to: '/admin/zones', label: 'مناطق التوصيل', end: false, icon: <IconMapPin /> }],
-  },
-  {
-    label: 'المحتوى',
-    items: [{ to: '/admin/reviews', label: 'آراء العملاء', end: false, icon: <IconMessage /> }],
   },
   {
     label: 'المظهر',

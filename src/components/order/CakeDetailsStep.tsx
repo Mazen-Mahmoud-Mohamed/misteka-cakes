@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { ChoiceCard } from '@/components/ui/ChoiceCard'
 import { TextAreaField } from '@/components/ui/Field'
 import { useCatalog } from '@/providers/CatalogProvider'
-import { listCakes, listExtras, listSizes } from '@/services/catalogService'
+import { getOffer, getProduct, listCakes, listExtras, listSizes } from '@/services/catalogService'
 import { recommendSizeId, sizeFitNote } from '@/services/pricingService'
 import type { OrderDraft, PricingGroup } from '@/types'
 import type { FieldErrors } from '@/utils/validation'
@@ -27,10 +27,13 @@ export function CakeDetailsStep({
   const fileRef = useRef<HTMLInputElement>(null)
   useCatalog()
   const cakes = listCakes()
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const offer = draft.offerId ? getOffer(draft.offerId) : undefined
+  const isNonCakeProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
   const sizes = listSizes(draft.structure)
   const people = Number(draft.servings)
   const recommended = recommendSizeId(sizes, people)
-  const needsCake = draft.designMode === 'catalog' || draft.designMode === 'similar'
+  const needsCake = !isNonCakeProduct && !offer && (draft.designMode === 'catalog' || draft.designMode === 'similar')
   const selectedSize = sizes.find((size) => size.id === draft.sizeId)
 
   function setStructure(structure: PricingGroup) {
@@ -42,8 +45,38 @@ export function CakeDetailsStep({
     })
   }
 
+  function toggleOptionValue(optionId: string, valueId: string, selectionType: string) {
+    const option = product?.options.find((o) => o.id === optionId)
+    if (!option) return
+    const relatedIds = new Set(option.values.map((v) => v.id))
+    const without = draft.optionValueIds.filter((id) => !relatedIds.has(id))
+    const selected = draft.optionValueIds.includes(valueId)
+    if (selectionType === 'multi') {
+      onChange({ optionValueIds: selected ? without : [...without, valueId] })
+      return
+    }
+    onChange({ optionValueIds: selected ? without : [...without, valueId] })
+  }
+
   return (
     <div className="grid gap-6">
+      {offer ? (
+        <div className="rounded-2xl border border-gold/40 bg-[#fff8f0] p-4">
+          <p className="text-xs font-bold text-[#8a6532]">عرض / باقة</p>
+          <p className="mt-1 font-display text-2xl text-rose-deep">{offer.name}</p>
+          <p className="mt-2 text-sm leading-7 text-muted">{offer.description}</p>
+        </div>
+      ) : null}
+
+      {product && isNonCakeProduct ? (
+        <div className="rounded-2xl border border-line bg-blush/40 p-4">
+          <p className="text-xs font-bold text-rose">المنتج</p>
+          <p className="mt-1 font-semibold text-ink">{product.name}</p>
+          {product.description ? <p className="mt-1 text-sm text-muted">{product.description}</p> : null}
+        </div>
+      ) : null}
+
+      {!isNonCakeProduct ? (
       <fieldset className="grid gap-3">
         <legend className="font-semibold text-ink">نوع التصميم</legend>
         <ChoiceCard
@@ -71,6 +104,7 @@ export function CakeDetailsStep({
           onChange={() => onChange({ designMode: 'custom' })}
         />
       </fieldset>
+      ) : null}
 
       {needsCake ? (
         <fieldset className="grid gap-3">
@@ -101,6 +135,41 @@ export function CakeDetailsStep({
             </p>
           ) : null}
         </fieldset>
+      ) : null}
+
+      {product && product.options.length > 0 ? (
+        <div className="grid gap-4">
+          <h3 className="font-semibold text-ink">خيارات إضافية</h3>
+          {product.options.map((option) => (
+            <fieldset key={option.id} className="rounded-2xl border border-line bg-paper p-4">
+              <legend className="px-1 text-sm font-bold text-ink">
+                {option.name}
+                {option.required ? ' *' : ''}
+              </legend>
+              {option.description ? <p className="mb-3 text-sm text-muted">{option.description}</p> : null}
+              <div className="flex flex-wrap gap-2">
+                {option.values.map((value) => {
+                  const selected = draft.optionValueIds.includes(value.id)
+                  return (
+                    <button
+                      key={value.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggleOptionValue(option.id, value.id, option.selectionType)}
+                      className={cx(
+                        'inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold',
+                        selected ? 'bg-rose-deep text-ivory' : 'border border-line bg-ivory text-ink',
+                      )}
+                    >
+                      {value.name}
+                      {value.priceAdjustment > 0 ? ` (+${formatEgp(value.priceAdjustment)})` : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            </fieldset>
+          ))}
+        </div>
       ) : null}
 
       <TextAreaField
@@ -154,6 +223,8 @@ export function CakeDetailsStep({
         </div>
       ) : null}
 
+      {!isNonCakeProduct ? (
+      <>
       <div className="rounded-2xl bg-ivory px-4 py-3 text-sm leading-7 text-muted">
         عدد الأفراد في هذا الطلب: <span className="font-semibold text-ink">{draft.servings || '—'}</span>. يمكن الرجوع للخطوة السابقة لتعديله.
       </div>
@@ -261,6 +332,8 @@ export function CakeDetailsStep({
           )
         })}
       </div>
+      </>
+      ) : null}
     </div>
   )
 }

@@ -23,9 +23,13 @@ import { AdminThemePage } from '@/pages/admin/AdminThemePage'
 import { CatalogPage } from '@/pages/CatalogPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { OfferDetailPage } from '@/pages/OfferDetailPage'
 import { OrderPage } from '@/pages/OrderPage'
 import { PricingPage } from '@/pages/PricingPage'
+import { ProductDetailPage } from '@/pages/ProductDetailPage'
 import { TrackOrderPage } from '@/pages/TrackOrderPage'
+import { AdminProductsPage } from '@/pages/admin/AdminProductsPage'
+import { AdminOffersPage } from '@/pages/admin/AdminOffersPage'
 
 function ScrollManager() {
   const location = useLocation()
@@ -59,6 +63,8 @@ function CustomerLayout() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/catalog" element={<CatalogPage />} />
+            <Route path="/product/:id" element={<ProductDetailPage />} />
+            <Route path="/offer/:id" element={<OfferDetailPage />} />
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/order" element={<OrderPage />} />
             <Route path="/track-order" element={<TrackOrderPage />} />
@@ -90,7 +96,9 @@ function AdminRoutes() {
             <Route path="orders" element={<AdminOrdersPage />} />
             <Route path="orders/:id" element={<AdminOrderDetailPage />} />
             <Route path="cakes" element={<AdminCakesPage />} />
+            <Route path="products" element={<AdminProductsPage />} />
             <Route path="categories" element={<AdminCategoriesPage />} />
+            <Route path="offers" element={<AdminOffersPage />} />
             <Route path="sizes" element={<AdminSizesPage />} />
             <Route path="fillings" element={<AdminFillingsPage />} />
             <Route path="extras" element={<AdminExtrasPage />} />

@@ -2,7 +2,7 @@ export const content = {
   hero: {
     intro: 'تورت أعياد ميلاد ومناسبات، وتصميم يتنفّذ حسب طلبك.',
     primaryCta: 'اطلبي تورتتك الآن',
-    secondaryCta: 'تصفحي التورت',
+    secondaryCta: 'تصفحي منتجاتنا',
   },
   designs: {
     eyebrow: 'التصميمات',

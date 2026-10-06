@@ -105,6 +105,29 @@ export async function upsertAdminCake(row: AdminCakeRow) {
   }
   const { error: qErr } = await supabase.from('cakes').upsert(payload, { onConflict: 'id' })
   if (qErr) return { ok: false, message: 'تعذّر حفظ التورتة.' }
+
+  // Keep products catalog in sync when the products system migration is applied.
+  const { error: productErr } = await supabase.from('products').upsert(
+    {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      category_id: row.category,
+      pricing_mode: 'cake_sizes',
+      fixed_price: null,
+      price_note: row.price_note ?? '',
+      legacy_cake_id: row.id,
+      image_key: row.image_key,
+      image_alt: row.image_alt || row.name,
+      sort_order: row.sort_order,
+      enabled: row.enabled,
+    },
+    { onConflict: 'id' },
+  )
+  if (productErr) {
+    console.warn('[admin] product sync skipped:', productErr.message)
+  }
+
   return { ok: true, message: 'تم حفظ التورتة.' }
 }
 

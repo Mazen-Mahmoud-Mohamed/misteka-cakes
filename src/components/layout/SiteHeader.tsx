@@ -41,8 +41,8 @@ export function SiteHeader() {
           <Link to="/" className={linkClass}>
             الرئيسية
           </Link>
-          <Link to="/catalog" className={linkClass}>
-            التورت
+          <Link to="/catalog" className={linkClass} aria-label="منتجاتنا">
+            منتجاتنا
           </Link>
           <Link to="/pricing" className={linkClass}>
             الأسعار
@@ -76,8 +76,8 @@ export function SiteHeader() {
           <Link to="/" className={linkClass} onClick={close}>
             الرئيسية
           </Link>
-          <Link to="/catalog" className={linkClass} onClick={close}>
-            التورت
+          <Link to="/catalog" className={linkClass} aria-label="منتجاتنا" onClick={close}>
+            منتجاتنا
           </Link>
           <Link to="/pricing" className={linkClass} onClick={close}>
             الأسعار

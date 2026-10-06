@@ -44,12 +44,35 @@ export function calculateOrderTotal(input: {
   filling: Filling | null
   extras: DesignExtra[]
   serviceType: '' | ServiceType
+  /** Optional product add-on lines (name + adjustment). */
+  optionLines?: Array<{ id: string; label: string; amount: number }>
+  /** When ordering a fixed-price non-cake product, use this as base instead of size. */
+  fixedProductBase?: { label: string; amount: number | null; pending?: boolean } | null
 }): OrderTotal {
   const lines: PriceLine[] = []
   let estimatedTotal: number | null = 0
   const pendingCharges: string[] = []
 
-  if (input.customSize || !input.size) {
+  if (input.fixedProductBase) {
+    if (input.fixedProductBase.pending || input.fixedProductBase.amount == null) {
+      lines.push({
+        id: 'base',
+        label: input.fixedProductBase.label,
+        amount: null,
+        status: 'pending',
+      })
+      pendingCharges.push(input.fixedProductBase.label)
+      estimatedTotal = null
+    } else {
+      lines.push({
+        id: 'base',
+        label: input.fixedProductBase.label,
+        amount: input.fixedProductBase.amount,
+        status: 'known',
+      })
+      estimatedTotal = input.fixedProductBase.amount
+    }
+  } else if (input.customSize || !input.size) {
     lines.push({
       id: 'base',
       label: 'سعر المقاس',
@@ -109,6 +132,16 @@ export function calculateOrderTotal(input: {
       })
       if (estimatedTotal != null) estimatedTotal += extra.price
     }
+  }
+
+  for (const option of input.optionLines ?? []) {
+    lines.push({
+      id: option.id,
+      label: option.label,
+      amount: option.amount,
+      status: 'known',
+    })
+    if (estimatedTotal != null) estimatedTotal += option.amount
   }
 
   if (input.serviceType === 'delivery') {

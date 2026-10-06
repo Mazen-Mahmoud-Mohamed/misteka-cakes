@@ -8,10 +8,30 @@ function readInitial(params: URLSearchParams): Partial<OrderDraft> {
   const initial: Partial<OrderDraft> = {}
   const mode = params.get('mode')
   const cake = params.get('cake')
+  const product = params.get('product')
+  const offer = params.get('offer')
+  const options = params.get('options')
+  const picks = params.get('picks')
   if (mode === 'catalog' || mode === 'similar' || mode === 'custom') {
     initial.designMode = mode satisfies DesignMode
   }
   if (cake) initial.cakeId = cake
+  if (product) initial.productId = product
+  if (offer) initial.offerId = offer
+  if (options) {
+    initial.optionValueIds = options
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+  }
+  if (picks) {
+    const map: Record<string, string> = {}
+    for (const part of picks.split(',')) {
+      const [componentId, productId] = part.split(':')
+      if (componentId?.trim() && productId?.trim()) map[componentId.trim()] = productId.trim()
+    }
+    initial.offerPicks = map
+  }
   return initial
 }
 

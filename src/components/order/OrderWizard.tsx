@@ -10,6 +10,7 @@ import { useOrderDraft } from '@/hooks/useOrderDraft'
 import { REFERENCE_IMAGE } from '@/lib/constants'
 import { checkAvailability } from '@/services/availabilityService'
 import { buildOrder, quoteDraft, submitOrder, toSummaryView, type SummaryView } from '@/services/orderService'
+import { getProduct } from '@/services/catalogService'
 import type { AvailabilityResult, Order, OrderDraft, PriceLine } from '@/types'
 import { isBookableDate } from '@/utils/dates'
 import { cx } from '@/utils/cx'
@@ -120,12 +121,22 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
     setErrors({})
-    setStep((value) => Math.min(value + 1, STEP_TITLES.length - 1))
+    const product = draft.productId ? getProduct(draft.productId) : undefined
+    const skipFilling = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+    setStep((value) => {
+      if (value === 1 && skipFilling) return 3
+      return Math.min(value + 1, STEP_TITLES.length - 1)
+    })
   }
 
   function goBack() {
     setErrors({})
-    setStep((value) => Math.max(value - 1, 0))
+    const product = draft.productId ? getProduct(draft.productId) : undefined
+    const skipFilling = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+    setStep((value) => {
+      if (value === 3 && skipFilling) return 1
+      return Math.max(value - 1, 0)
+    })
   }
 
   async function confirm() {
@@ -277,7 +288,7 @@ export function OrderWizard({ initial }: { initial: Partial<OrderDraft> }) {
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
           {step === 0 ? (
             <Link to="/catalog" className="inline-flex min-h-12 items-center justify-center rounded-full px-4 font-semibold text-rose-deep">
-              تصفحي التورت
+              تصفحي منتجاتنا
             </Link>
           ) : (
             <Button type="button" variant="ghost" onClick={goBack}>

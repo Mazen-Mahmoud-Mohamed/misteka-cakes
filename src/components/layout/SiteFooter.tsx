@@ -83,8 +83,8 @@ export function SiteFooter() {
         </nav>
 
         <nav className="mt-4 flex flex-wrap justify-center gap-2 font-semibold text-ink" aria-label="تذييل">
-          <Link to="/catalog" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
-            التورت
+          <Link to="/catalog" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose" aria-label="منتجاتنا">
+            منتجاتنا
           </Link>
           <Link to="/order" className="inline-flex min-h-11 items-center rounded-full px-3 hover:text-rose">
             الطلب

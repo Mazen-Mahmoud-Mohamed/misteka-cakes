@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { AdminBadge, EnabledBadge } from '@/components/admin/AdminBadge'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { AdminPage, AdminPageHeader } from '@/components/admin/AdminCard'
-import { AdminSwitch, AdminTextAreaField, AdminTextField } from '@/components/admin/AdminField'
+import { AdminSelectField, AdminSwitch, AdminTextAreaField, AdminTextField } from '@/components/admin/AdminField'
 import { AdminList, AdminTable, Td, Th, Tr } from '@/components/admin/AdminTable'
 import {
   CatalogEditor,
@@ -10,6 +10,7 @@ import {
   CatalogResults,
   CatalogToolbar,
   EditButton,
+  SORT_HINT,
   useCatalogCrud,
   useCatalogFilter,
 } from '@/components/admin/catalog'
@@ -17,57 +18,115 @@ import { ConfirmDialog } from '@/components/admin/ConfirmDialog'
 import { IconPlus, IconRefresh, IconTag } from '@/components/admin/icons'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import {
-  deleteAdminCategory,
+  deleteAdminProductCategory,
   generateId,
-  listAdminCakes,
-  listAdminCategories,
-  upsertAdminCategory,
-  type AdminCategoryRow,
-} from '@/services/admin/adminCatalogService'
+  listAdminCategoryProductCounts,
+  listAdminProductCategories,
+  upsertAdminProductCategory,
+  type AdminProductCategoryRow,
+} from '@/services/admin/adminProductService'
+
+const OFFERS_ID = 'cat-offers'
+const CAKES_ID = 'cat-cakes'
+
+const empty: AdminProductCategoryRow = {
+  id: '',
+  parent_id: null,
+  name: '',
+  description: '',
+  kind: 'standard',
+  sort_order: 100,
+  enabled: true,
+}
+
+type FlatRow = { row: AdminProductCategoryRow; depth: number }
+
+function flattenTree(categories: AdminProductCategoryRow[]): FlatRow[] {
+  const childrenOf = (parentId: string | null) =>
+    categories
+      .filter((c) => c.parent_id === parentId)
+      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar'))
+
+  const out: FlatRow[] = []
+  function walk(parentId: string | null, depth: number) {
+    for (const row of childrenOf(parentId)) {
+      out.push({ row, depth })
+      walk(row.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  return out
+}
 
 export function AdminCategoriesPage() {
   usePageTitle('التصنيفات | مستكة')
-  const [cakeCounts, setCakeCounts] = useState<Record<string, number>>({})
+  const [productCounts, setProductCounts] = useState<Record<string, number>>({})
   const [deleteError, setDeleteError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const categoryIds = useRef<string[]>([])
+  const categoriesRef = useRef<AdminProductCategoryRow[]>([])
   const nextSort = useRef(10)
 
-  const crud = useCatalogCrud<AdminCategoryRow>({
+  const crud = useCatalogCrud<AdminProductCategoryRow>({
     list: async () => {
-      const [categoriesRes, cakesRes] = await Promise.all([listAdminCategories(), listAdminCakes()])
-      const counts: Record<string, number> = {}
-      for (const cake of cakesRes.data ?? []) counts[cake.category] = (counts[cake.category] ?? 0) + 1
-      setCakeCounts(counts)
+      const [categoriesRes, countsRes] = await Promise.all([
+        listAdminProductCategories(),
+        listAdminCategoryProductCounts(),
+      ])
+      setProductCounts(countsRes.data ?? {})
+      categoriesRef.current = categoriesRes.data ?? []
       categoryIds.current = (categoriesRes.data ?? []).map((row) => row.id)
-      nextSort.current = Math.max(0, ...(categoriesRes.data ?? []).map((row) => row.sort_order)) + 10
+      nextSort.current = Math.max(0, ...(categoriesRes.data ?? []).map((row) => row.sort_order), 0) + 10
       return categoriesRes
     },
-    upsert: upsertAdminCategory,
-    prepare: (draft) => ({
-      ...draft,
-      id: draft.id || generateId(draft.name, 'category', categoryIds.current),
-      name: draft.name.trim(),
-      description: draft.description.trim(),
-      sort_order: Number(draft.sort_order) || nextSort.current,
-    }),
-    validate: (draft) => ({
-      name: draft.name.trim() ? undefined : 'أدخلي اسم التصنيف.',
-    }),
+    upsert: upsertAdminProductCategory,
+    prepare: (draft) => {
+      const isOffers = draft.id === OFFERS_ID || draft.kind === 'offers'
+      return {
+        ...draft,
+        id: draft.id || generateId(draft.name, 'cat', categoryIds.current),
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        parent_id: isOffers ? null : draft.parent_id || null,
+        kind: isOffers ? 'offers' : 'standard',
+        sort_order: Number(draft.sort_order) || nextSort.current,
+      }
+    },
+    validate: (draft) => {
+      const errors: Record<string, string | undefined> = {
+        name: draft.name.trim() ? undefined : 'أدخلي اسم التصنيف.',
+      }
+      if (draft.parent_id === draft.id && draft.id) {
+        errors.parent_id = 'لا يمكن أن يكون التصنيف أبًا لنفسه.'
+      }
+      if (draft.parent_id) {
+        const parent = categoriesRef.current.find((c) => c.id === draft.parent_id)
+        if (parent?.kind === 'offers') {
+          errors.parent_id = 'لا يمكن إضافة تصنيفات فرعية تحت العروض.'
+        }
+        if (parent?.parent_id) {
+          errors.parent_id = 'اختاري تصنيفًا رئيسيًا فقط كأب.'
+        }
+      }
+      return errors
+    },
     onDiscard: () => setDeleteError(''),
     onSaved: () => setDeleteError(''),
   })
-  const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.description])
 
-  function startNew() {
+  const filter = useCatalogFilter(crud.rows, (row) => [row.name, row.description])
+  const filteredIds = new Set(filter.filtered.map((row) => row.id))
+  const tree = flattenTree(crud.rows).filter(({ row }) => filteredIds.has(row.id))
+
+  function startNew(parentId: string | null = null) {
+    const siblings = crud.rows.filter((c) => c.parent_id === parentId)
+    const sort = Math.max(0, ...siblings.map((c) => c.sort_order), 0) + 10
     crud.open(
       {
-        id: '',
-        name: '',
-        description: '',
-        enabled: true,
-        sort_order: nextSort.current,
+        ...empty,
+        parent_id: parentId,
+        sort_order: sort,
       },
       null,
     )
@@ -76,7 +135,7 @@ export function AdminCategoriesPage() {
   async function runDelete() {
     if (!crud.original) return
     setDeleting(true)
-    const result = await deleteAdminCategory(crud.original.id)
+    const result = await deleteAdminProductCategory(crud.original.id)
     setDeleting(false)
     setConfirmDelete(false)
     if (!result.ok) {
@@ -88,24 +147,31 @@ export function AdminCategoriesPage() {
   }
 
   const draft = crud.draft
-  const draftCount = crud.original ? (cakeCounts[crud.original.id] ?? 0) : 0
+  const draftCount = crud.original ? (productCounts[crud.original.id] ?? 0) : 0
+  const childCount = crud.original ? crud.rows.filter((c) => c.parent_id === crud.original!.id).length : 0
+  const isProtectedOffers = crud.original?.id === OFFERS_ID || crud.original?.kind === 'offers'
+  const canDelete = Boolean(crud.original) && !isProtectedOffers && draftCount === 0 && childCount === 0
 
   function countLabel(id: string) {
-    const n = cakeCounts[id] ?? 0
-    return n === 0 ? 'لا توجد تورت' : n === 1 ? 'تورتة واحدة' : `${n} تورت`
+    const n = productCounts[id] ?? 0
+    return n === 0 ? 'لا توجد منتجات' : n === 1 ? 'منتج واحد' : `${n} منتجات`
   }
+
+  const parentChoices = crud.rows.filter(
+    (c) => !c.parent_id && c.kind !== 'offers' && c.id !== draft?.id,
+  )
 
   return (
     <AdminPage>
       <AdminPageHeader
         title="التصنيفات"
-        description="تصنيفات التورت التي تظهر كفلاتر في صفحة التورت."
+        description="تصنيفات المنتجات الهرمية التي تنظّم الكتالوج للعملاء."
         actions={
           <>
             <AdminButton icon={<IconRefresh size={18} />} loading={crud.refreshing} disabled={crud.loading} onClick={() => void crud.load(true)}>
               تحديث
             </AdminButton>
-            <AdminButton variant="primary" icon={<IconPlus size={18} />} disabled={crud.loading} onClick={startNew}>
+            <AdminButton variant="primary" icon={<IconPlus size={18} />} disabled={crud.loading} onClick={() => startNew(null)}>
               إضافة تصنيف
             </AdminButton>
           </>
@@ -131,10 +197,10 @@ export function AdminCategoriesPage() {
         total={crud.rows.length}
         visible={filter.filtered.length}
         emptyTitle="لا توجد تصنيفات"
-        emptyDescription="أضيفي أول تصنيف لتنظيم التورت في الموقع."
+        emptyDescription="أضيفي أول تصنيف لتنظيم المنتجات في الموقع."
         emptyIcon={<IconTag />}
         addLabel="إضافة تصنيف"
-        onAdd={startNew}
+        onAdd={() => startNew(null)}
         onClearFilters={() => {
           filter.setQuery('')
           filter.setEnabled('all')
@@ -145,8 +211,8 @@ export function AdminCategoriesPage() {
             head={
               <>
                 <Th>التصنيف</Th>
-                <Th>عدد التورت</Th>
-                <Th className="text-center">ترتيب الظهور</Th>
+                <Th>عدد المنتجات</Th>
+                <Th className="text-center">ترتيب العرض</Th>
                 <Th>الحالة</Th>
                 <Th>
                   <span className="sr-only">إجراء</span>
@@ -154,11 +220,17 @@ export function AdminCategoriesPage() {
               </>
             }
           >
-            {filter.filtered.map((row) => (
+            {tree.map(({ row, depth }) => (
               <Tr key={row.id} className={row.enabled ? undefined : 'bg-cream/30'}>
                 <Td>
-                  <p className="font-bold">{row.name}</p>
-                  {row.description ? <p className="text-xs text-muted">{row.description}</p> : null}
+                  <div style={{ paddingInlineStart: depth * 1.25 + 'rem' }}>
+                    <p className="font-bold">
+                      {depth > 0 ? <span className="me-1 text-muted">└</span> : null}
+                      {row.name}
+                    </p>
+                    {row.description ? <p className="text-xs text-muted">{row.description}</p> : null}
+                    {row.kind === 'offers' ? <p className="text-xs text-muted">قسم العروض</p> : null}
+                  </div>
                 </Td>
                 <Td>
                   <AdminBadge tone="info">{countLabel(row.id)}</AdminBadge>
@@ -176,10 +248,15 @@ export function AdminCategoriesPage() {
         }
         list={
           <AdminList label="التصنيفات">
-            {filter.filtered.map((row) => (
+            {tree.map(({ row, depth }) => (
               <CatalogListItem
                 key={row.id}
-                title={row.name}
+                title={
+                  <span style={{ paddingInlineStart: depth * 0.75 + 'rem' }}>
+                    {depth > 0 ? '└ ' : ''}
+                    {row.name}
+                  </span>
+                }
                 subtitle={row.description || undefined}
                 badges={
                   <>
@@ -201,7 +278,7 @@ export function AdminCategoriesPage() {
         newTitle="تصنيف جديد"
         editTitle="تعديل التصنيف"
         disableTitle="إخفاء التصنيف؟"
-        disableBody="سيختفي هذا التصنيف وكل التورت التابعة له من الموقع بعد الحفظ. لا يتم حذف أي تورتة، ويمكنك إظهاره مرة أخرى لاحقًا."
+        disableBody="سيختفي هذا التصنيف من الموقع بعد الحفظ. المنتجات لا تُحذف، ويمكنك إظهاره مرة أخرى لاحقًا."
       >
         {draft ? (
           <div className="grid gap-4">
@@ -216,41 +293,78 @@ export function AdminCategoriesPage() {
             <AdminTextAreaField
               id="category-desc"
               label="وصف التصنيف"
-              hint="اختياري، للاستخدام الداخلي."
+              hint="اختياري، يظهر للدعم الداخلي أو الوصف في الموقع."
               value={draft.description}
               onChange={(e) => crud.update({ description: e.target.value })}
             />
+            {draft.kind === 'offers' || draft.id === OFFERS_ID ? (
+              <AdminTextField
+                id="category-parent-ro"
+                label="التصنيف الأب"
+                value="رئيسي"
+                readOnly
+                hint="قسم العروض يبقى تصنيفًا رئيسيًا بدون فروع."
+              />
+            ) : (
+              <AdminSelectField
+                id="category-parent"
+                label="التصنيف الأب"
+                value={draft.parent_id ?? ''}
+                error={crud.fieldErrors.parent_id}
+                hint={
+                  draft.parent_id === CAKES_ID
+                    ? 'التصنيفات الفرعية تحت التورت تُزامَن تلقائيًا مع تصنيفات التورت.'
+                    : 'اختاري «رئيسي» للقسم الأعلى، أو تصنيفًا رئيسيًا لإنشاء فرع.'
+                }
+                onChange={(e) => crud.update({ parent_id: e.target.value || null })}
+              >
+                <option value="">رئيسي</option>
+                {parentChoices.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.enabled ? c.name : `${c.name} (مخفي)`}
+                  </option>
+                ))}
+              </AdminSelectField>
+            )}
             <AdminTextField
               id="category-sort"
-              label="ترتيب الظهور"
+              label="ترتيب العرض"
               type="number"
               inputMode="numeric"
               dir="ltr"
               className="text-start"
-              hint="رقم أصغر يعني ظهور التصنيف قبل غيره."
+              hint={SORT_HINT}
               value={String(draft.sort_order)}
               onChange={(e) => crud.update({ sort_order: Number(e.target.value) })}
             />
             <AdminSwitch
               id="category-enabled"
-              label="إظهار التصنيف في الموقع"
-              description="عند إيقافه يختفي التصنيف والتورت التابعة له من الموقع."
+              label="ظاهر في الموقع"
+              description="عند إيقافه يختفي التصنيف من الموقع."
               checked={draft.enabled}
               onChange={(enabled) => crud.update({ enabled })}
             />
             {crud.original ? (
               <div className="grid gap-2 border-t border-line pt-4">
-                {draftCount > 0 ? (
+                {isProtectedOffers ? (
+                  <p className="text-[0.8125rem] leading-6 text-muted">
+                    قسم العروض لا يُحذف. يمكنك إخفاؤه من الموقع بدلًا من ذلك.
+                  </p>
+                ) : childCount > 0 ? (
+                  <p className="text-[0.8125rem] leading-6 text-muted">
+                    لا يمكن حذف هذا التصنيف لأنه يحتوي تصنيفات فرعية. انقليها أو أخفيه.
+                  </p>
+                ) : draftCount > 0 ? (
                   <p className="text-[0.8125rem] leading-6 text-muted">
                     لا يمكن حذف هذا التصنيف لأنه مرتبط بـ {countLabel(crud.original.id)}. يمكنك إخفاؤه بدلًا من ذلك.
                   </p>
-                ) : (
+                ) : canDelete ? (
                   <div>
                     <AdminButton size="sm" variant="dangerOutline" onClick={() => setConfirmDelete(true)}>
                       حذف التصنيف
                     </AdminButton>
                   </div>
-                )}
+                ) : null}
                 {deleteError ? (
                   <p className="text-[0.8125rem] leading-6 font-semibold text-[#8a2e2e]" role="alert">
                     {deleteError}
@@ -265,7 +379,7 @@ export function AdminCategoriesPage() {
       <ConfirmDialog
         open={confirmDelete}
         title="حذف التصنيف؟"
-        body="سيتم حذف هذا التصنيف نهائيًا. لا توجد تورت مرتبطة به."
+        body="سيتم حذف هذا التصنيف نهائيًا. لا توجد منتجات أو فروع مرتبطة به."
         confirmLabel="حذف"
         cancelLabel="رجوع"
         danger

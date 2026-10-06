@@ -84,6 +84,14 @@ export interface OrderDraft {
   time: string
   designMode: DesignMode
   cakeId: string
+  /** Non-cake catalog product (optional). */
+  productId: string
+  /** Promotional offer request (optional). */
+  offerId: string
+  /** Selected product_option_values ids. */
+  optionValueIds: string[]
+  /** offer component_id → chosen product_id for customer_picks. */
+  offerPicks: Record<string, string>
   structure: PricingGroup
   sizeId: string
   designNotes: string
@@ -98,6 +106,15 @@ export interface OrderExtraSelection {
   name: string
   price: number | null
   priceStatus: ChargeStatus
+}
+
+export type OrderKind = 'cake' | 'product' | 'offer'
+
+export interface OfferSelectionPayload {
+  componentId: string
+  productId: string
+  sizeId?: string
+  optionValueIds?: string[]
 }
 
 export interface Order {
@@ -134,6 +151,15 @@ export interface Order {
   status: OrderStatus
   createdAt: string
   availabilitySource: DataSource
+  /** Server order kind; defaults to cake for legacy. */
+  orderKind?: OrderKind
+  productId?: string | null
+  offerId?: string | null
+  offerName?: string | null
+  /** Client selection IDs only — never trusted as prices. */
+  quantity?: number
+  optionValueIds?: string[]
+  offerSelections?: OfferSelectionPayload[]
 }
 
 export interface PriceLine {

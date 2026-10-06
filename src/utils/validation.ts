@@ -1,5 +1,4 @@
-import { listTimeSlots } from '@/services/catalogService'
-import { getZone } from '@/services/catalogService'
+import { getProduct, getZone, listTimeSlots } from '@/services/catalogService'
 import type { AvailabilityResult, OrderDraft } from '@/types'
 import { isBookableDate, parseISODate, tooSoonMessage } from '@/utils/dates'
 import { isEgyptianMobile, normalizeDigits } from '@/utils/phone'
@@ -57,9 +56,20 @@ export function validateBasicInfo(draft: OrderDraft, availability: AvailabilityR
 export function validateCake(draft: OrderDraft): FieldErrors {
   const errors: FieldErrors = {}
   const notes = draft.designNotes.trim()
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const isNonCakeProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+
+  if (isNonCakeProduct) {
+    for (const option of product?.options ?? []) {
+      if (!option.required) continue
+      const selected = option.values.some((v) => draft.optionValueIds.includes(v.id))
+      if (!selected) errors[`option_${option.id}`] = `اختاري: ${option.name}`
+    }
+    return clean(errors)
+  }
 
   if (draft.designMode === 'catalog' || draft.designMode === 'similar') {
-    if (!draft.cakeId) errors.cakeId = 'اختاري التصميم.'
+    if (!draft.cakeId && !draft.offerId) errors.cakeId = 'اختاري التصميم.'
   }
 
   if (draft.designMode === 'similar' && notes.length < 8) {
@@ -70,12 +80,15 @@ export function validateCake(draft: OrderDraft): FieldErrors {
     errors.designNotes = 'صفي التصميم المطلوب: الألوان، المناسبة، وأي كتابة.'
   }
 
-  if (!draft.sizeId) errors.sizeId = 'اختاري المقاس.'
+  if (!draft.sizeId && !draft.offerId) errors.sizeId = 'اختاري المقاس.'
 
   return clean(errors)
 }
 
 export function validateFilling(draft: OrderDraft): FieldErrors {
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const isNonCakeProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+  if (isNonCakeProduct) return {}
   if (!draft.fillingId) return { fillingId: 'اختاري الحشوة.' }
   return {}
 }

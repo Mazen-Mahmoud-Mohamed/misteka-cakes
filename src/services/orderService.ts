@@ -1,6 +1,6 @@
 import { ORDER_REFERENCES_BUCKET, REFERENCE_IMAGE, STORAGE_KEYS } from '@/lib/constants'
 import { getSupabase } from '@/lib/supabase'
-import { getCake, getDeliveryPolicy, getFilling, getSize, getZone, listExtras } from '@/services/catalogService'
+import { getCake, getDeliveryPolicy, getFilling, getOffer, getProduct, getSize, getZone, listExtras } from '@/services/catalogService'
 import { formatArabicDate, formatTimeLabel } from '@/utils/dates'
 import { calculateOrderTotal, knownExtrasTotal } from '@/services/pricingService'
 import type {
@@ -46,17 +46,42 @@ export function toSummaryView(draft: OrderDraft): SummaryView {
   const size = customSize ? null : getSize(draft.sizeId)
   const filling = getFilling(draft.fillingId)
   const cake = draft.cakeId ? getCake(draft.cakeId) : undefined
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const offer = draft.offerId ? getOffer(draft.offerId) : undefined
   const zone = draft.areaId ? getZone(draft.areaId) : undefined
   const extras = listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+
+  const cakeName = offer
+    ? `عرض: ${offer.name}`
+    : product && !cake
+      ? product.name
+      : draft.designMode === 'custom'
+        ? 'تصميم مخصص'
+        : (cake?.name ?? 'لم يُحدَّد')
+
+  const optionNotes = product
+    ? product.options
+        .flatMap((opt) => opt.values.filter((v) => draft.optionValueIds.includes(v.id)).map((v) => `${opt.name}: ${v.name}`))
+        .join('، ')
+    : ''
 
   return {
     customerName: draft.customerName.trim(),
     phone: draft.phone.trim(),
-    cakeName: draft.designMode === 'custom' ? 'تصميم مخصص' : (cake?.name ?? 'لم يُحدَّد'),
-    sizeLabel: customSize ? 'مقاس حسب الطلب' : (size?.label ?? 'لم يُحدَّد'),
+    cakeName,
+    sizeLabel: product && product.pricingMode !== 'cake_sizes'
+      ? product.pricingMode === 'fixed'
+        ? 'سعر ثابت'
+        : 'يُحدَّد لاحقًا'
+      : customSize
+        ? 'مقاس حسب الطلب'
+        : (size?.label ?? 'لم يُحدَّد'),
     servingsLabel: draft.servings ? `${draft.servings} فرد` : 'لم يُحدَّد',
     fillingName: filling?.name ?? 'لم يُحدَّد',
-    extraNames: extras.map((extra) => extra.name),
+    extraNames: [
+      ...extras.map((extra) => extra.name),
+      ...(optionNotes ? [optionNotes] : []),
+    ],
     areaLabel: draft.serviceType === 'delivery' ? (zone?.name ?? 'لم تُحدَّد') : 'استلام',
     serviceLabel: draft.serviceType === 'delivery' ? 'توصيل' : draft.serviceType === 'pickup' ? 'استلام' : 'لم تُحدَّد',
     dateLabel: draft.date ? formatArabicDate(draft.date) : 'لم يُحدَّد',
@@ -70,16 +95,45 @@ export function toSummaryView(draft: OrderDraft): SummaryView {
 }
 
 export function quoteDraft(draft: OrderDraft): OrderTotal {
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const offer = draft.offerId ? getOffer(draft.offerId) : undefined
+  const isFixedProduct = Boolean(product && product.pricingMode !== 'cake_sizes' && !draft.cakeId)
+
   const customSize = draft.sizeId === 'custom'
   const size = customSize ? null : getSize(draft.sizeId) ?? null
-  const filling = getFilling(draft.fillingId) ?? null
-  const extras = listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+  const filling = isFixedProduct ? null : getFilling(draft.fillingId) ?? null
+  const extras = isFixedProduct ? [] : listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+
+  const optionLines =
+    product?.options.flatMap((opt) =>
+      opt.values
+        .filter((v) => draft.optionValueIds.includes(v.id))
+        .map((v) => ({
+          id: v.id,
+          label: `${opt.name}: ${v.name}`,
+          amount: v.priceAdjustment,
+        })),
+    ) ?? []
+
+  let fixedProductBase: { label: string; amount: number | null; pending?: boolean } | null = null
+  if (offer?.pricingRule === 'custom_bundle' && offer.customBundlePrice != null) {
+    fixedProductBase = { label: `باقة: ${offer.name}`, amount: offer.customBundlePrice }
+  } else if (isFixedProduct && product) {
+    if (product.pricingMode === 'fixed') {
+      fixedProductBase = { label: product.name, amount: product.fixedPrice }
+    } else {
+      fixedProductBase = { label: product.name, amount: null, pending: true }
+    }
+  }
+
   return calculateOrderTotal({
-    size,
-    customSize,
+    size: isFixedProduct || offer?.pricingRule === 'custom_bundle' ? null : size,
+    customSize: isFixedProduct || offer?.pricingRule === 'custom_bundle' ? false : customSize,
     filling,
     extras,
     serviceType: draft.serviceType,
+    optionLines,
+    fixedProductBase,
   })
 }
 
@@ -108,13 +162,40 @@ export function buildOrder(
 ): BuiltOrder {
   const { id, orderNumber } = createIds()
   const total = quoteDraft(draft)
-  const customSize = draft.sizeId === 'custom'
-  const size = customSize ? null : getSize(draft.sizeId)
-  const filling = getFilling(draft.fillingId)
-  const extras = listExtras().filter((extra) => draft.extraIds.includes(extra.id))
+  const product = draft.productId ? getProduct(draft.productId) : undefined
+  const offer = draft.offerId ? getOffer(draft.offerId) : undefined
+  const orderKind: Order['orderKind'] = offer
+    ? 'offer'
+    : product && (product.pricingMode !== 'cake_sizes' || !draft.cakeId)
+      ? 'product'
+      : 'cake'
+
+  // Prefer legacy cake path when ordering a cake-linked product via cakeId.
+  const useProductPath = orderKind === 'product'
+  const useOfferPath = orderKind === 'offer'
+  const isNonCakeProduct = useProductPath
+
+  const effectiveSizeId = isNonCakeProduct || (offer && !draft.sizeId) ? (draft.sizeId || 'custom') : draft.sizeId
+  const customSize = effectiveSizeId === 'custom'
+  const size = customSize ? null : getSize(effectiveSizeId)
+  const filling = isNonCakeProduct || useOfferPath ? null : getFilling(draft.fillingId)
+  const extras = isNonCakeProduct || useOfferPath ? [] : listExtras().filter((extra) => draft.extraIds.includes(extra.id))
   const cake = draft.cakeId ? getCake(draft.cakeId) : undefined
   const zone = draft.areaId ? getZone(draft.areaId) : undefined
   const knownExtras = knownExtrasTotal(extras)
+
+  const offerSelections =
+    offer?.components.map((component) => ({
+      componentId: component.id,
+      productId:
+        draft.offerPicks[component.id] ||
+        component.productId ||
+        draft.productId ||
+        draft.cakeId ||
+        '',
+      sizeId: draft.sizeId || undefined,
+      optionValueIds: draft.optionValueIds,
+    })) ?? []
 
   const order: Order = {
     id,
@@ -125,19 +206,25 @@ export function buildOrder(
     areaId: draft.serviceType === 'delivery' ? (zone?.id ?? null) : null,
     addressNotes: draft.addressNotes.trim(),
     serviceType: draft.serviceType === 'pickup' ? 'pickup' : 'delivery',
-    cakeId: draft.designMode === 'custom' ? null : cake?.id ?? null,
-    cakeName: draft.designMode === 'custom' ? null : cake?.name ?? null,
-    designMode: draft.designMode,
-    customDesign: draft.designMode !== 'catalog',
+    cakeId: useProductPath || useOfferPath || draft.designMode === 'custom' ? null : cake?.id ?? null,
+    cakeName: useProductPath
+      ? product?.name ?? null
+      : useOfferPath
+        ? offer?.name ?? null
+        : draft.designMode === 'custom'
+          ? null
+          : cake?.name ?? null,
+    designMode: useProductPath || useOfferPath ? 'catalog' : draft.designMode,
+    customDesign: useProductPath || useOfferPath ? false : draft.designMode !== 'catalog',
     referenceImage: referenceImagePath,
     referenceImageStatus,
-    servings: Number(draft.servings),
-    size: customSize ? 'مقاس حسب الطلب' : (size?.label ?? ''),
-    sizeId: draft.sizeId,
+    servings: Number(draft.servings) || 1,
+    size: customSize ? (useProductPath || useOfferPath ? 'منتج' : 'مقاس حسب الطلب') : (size?.label ?? ''),
+    sizeId: effectiveSizeId,
     date: draft.date,
     time: draft.time,
-    filling: filling?.name ?? '',
-    fillingId: filling?.id ?? '',
+    filling: filling?.name ?? (useProductPath || useOfferPath ? '—' : ''),
+    fillingId: filling?.id ?? (useProductPath || useOfferPath ? 'none' : ''),
     fillingPrice: filling?.price ?? null,
     extras: extras.map((extra) => ({
       id: extra.id,
@@ -145,8 +232,10 @@ export function buildOrder(
       price: extra.price,
       priceStatus: extra.priceStatus,
     })),
+    // Customer notes only — product/offer identity is sent as IDs, priced server-side.
     notes: draft.designNotes.trim(),
-    basePrice: size?.price ?? null,
+    // Local preview totals only; Supabase submit ignores these and recomputes.
+    basePrice: size?.price ?? (product?.pricingMode === 'fixed' ? product.fixedPrice : null),
     extrasPrice: knownExtras,
     deliveryPrice: draft.serviceType === 'delivery' ? getDeliveryPolicy().fee : null,
     totalPrice: total.estimatedTotal,
@@ -155,6 +244,13 @@ export function buildOrder(
     status: 'pending_review',
     createdAt: new Date().toISOString(),
     availabilitySource,
+    orderKind,
+    productId: useProductPath ? draft.productId || product?.id || null : null,
+    offerId: useOfferPath ? draft.offerId || null : null,
+    offerName: useOfferPath ? offer?.name ?? null : null,
+    quantity: 1,
+    optionValueIds: draft.optionValueIds ?? [],
+    offerSelections: useOfferPath ? offerSelections : [],
   }
 
   return { order, total }
@@ -253,27 +349,61 @@ function mapRpcOrder(raw: Record<string, unknown>, availabilitySource: DataSourc
     status: 'pending_review',
     createdAt: String(raw.createdAt ?? new Date().toISOString()),
     availabilitySource,
+    orderKind: (raw.orderKind as Order['orderKind']) ?? 'cake',
+    productId: raw.productId == null ? null : String(raw.productId),
+    offerId: raw.offerId == null ? null : String(raw.offerId),
+    offerName: raw.offerName == null ? null : String(raw.offerName),
   }
 }
 
 function placeOrderPayload(order: Order, referencePath: string | null) {
-  return {
+  const kind = order.orderKind ?? 'cake'
+  // IDs + customer fields only. Never send prices, discounts, or totals.
+  const base = {
     id: order.id,
+    order_kind: kind,
     customer_name: order.customerName,
     phone: order.phone,
     service_type: order.serviceType,
     area_id: order.areaId,
     address_notes: order.addressNotes,
     design_mode: order.designMode,
-    cake_id: order.cakeId,
-    size_id: order.sizeId,
     servings: order.servings,
     event_date: order.date,
     event_time: order.time,
-    filling_id: order.fillingId,
-    extra_ids: order.extras.map((extra) => extra.id),
     notes: order.notes,
     reference_image: referencePath,
+  }
+
+  if (kind === 'product') {
+    return {
+      ...base,
+      product_id: order.productId,
+      quantity: order.quantity ?? 1,
+      option_value_ids: order.optionValueIds ?? [],
+      size_id: order.sizeId || null,
+    }
+  }
+
+  if (kind === 'offer') {
+    return {
+      ...base,
+      offer_id: order.offerId,
+      offer_selections: (order.offerSelections ?? []).map((sel) => ({
+        component_id: sel.componentId,
+        product_id: sel.productId,
+        size_id: sel.sizeId || null,
+        option_value_ids: sel.optionValueIds ?? [],
+      })),
+    }
+  }
+
+  return {
+    ...base,
+    cake_id: order.cakeId,
+    size_id: order.sizeId,
+    filling_id: order.fillingId,
+    extra_ids: order.extras.map((extra) => extra.id),
   }
 }
 
@@ -332,6 +462,30 @@ function messageForCode(code: string | undefined, fallback?: string): string {
       return 'اكتبي رقم موبايل مصري صحيح.'
     case 'invalid_customer':
       return 'اكتبي الاسم بشكل صحيح.'
+    case 'quote_only':
+      return 'هذا المنتج يتطلب طلب سعر، وليس طلبًا مدفوعًا.'
+    case 'invalid_product':
+      return 'المنتج المختار غير متاح.'
+    case 'invalid_product_price':
+      return 'سعر المنتج غير مُعد.'
+    case 'invalid_option':
+      return 'خيار غير صالح.'
+    case 'missing_required_option':
+      return fallback || 'اختاري الخيارات المطلوبة.'
+    case 'invalid_quantity':
+      return 'الكمية غير صالحة.'
+    case 'invalid_offer':
+      return 'العرض غير متاح.'
+    case 'offer_expired':
+      return 'انتهت صلاحية العرض.'
+    case 'offer_not_started':
+      return 'العرض لم يبدأ بعد.'
+    case 'missing_offer_selection':
+      return 'اختاري منتجًا ضمن العرض.'
+    case 'invalid_offer_selection':
+      return 'اختيار العرض غير صالح.'
+    case 'invalid_order_kind':
+      return 'نوع الطلب غير صالح.'
     case 'invalid_reference':
       return 'تعذّر إرفاق الصورة المرجعية.'
     case 'invalid_notes':
